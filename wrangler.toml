@@ -37,7 +37,7 @@ crons = ["*/15 * * * *"]
 name = "iris-api"
 
 [env.production.vars]
-CORS_ORIGINS = "http://localhost:3000,http://localhost:5173"
+CORS_ORIGINS = "http://localhost:3000,http://localhost:5173,https://iris-dashboard-phi.vercel.app"
 
 [[env.production.kv_namespaces]]
 binding = "SNAPSHOTS"
