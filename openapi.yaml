@@ -1,0 +1,55 @@
+openapi: 3.1.0
+info:
+  title: Iris API
+  version: 2.0.3
+paths:
+  /health:
+    get:
+      responses:
+        '200': { description: Worker is running }
+  /ready:
+    get:
+      responses:
+        '200': { description: A usable resolved snapshot is available }
+        '503': { description: Snapshot KV binding or resolved data is unavailable }
+  /v1/status:
+    get:
+      responses:
+        '200': { description: API version, live-refresh snapshot freshness, and independent static market snapshot source/asOf }
+  /v1/market:
+    get:
+      responses:
+        '200': { description: Live Hiro fees, latest Stacks tip and supply, plus static market snapshot source/asOf }
+  /v1/assets:
+    get:
+      responses:
+        '200': { description: Curated market assets from the bundled static snapshot; response metadata includes source and fixed asOf }
+  /v1/assets/{symbol}:
+    get:
+      parameters:
+        - in: path
+          name: symbol
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Asset }
+        '404': { description: Asset not found }
+  /v1/swaps:
+    get:
+      responses:
+        '200': { description: Curated-wallet swaps }
+  /v1/wallets:
+    get:
+      description: Returns metadata for the fixed public third-party demo wallet addresses; no wallet credentials are required.
+      responses:
+        '200': { description: Metadata for the three public third-party demo wallets }
+  /v1/wallets/{address}:
+    get:
+      parameters:
+        - in: path
+          name: address
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Cached public demo wallet balances, portfolio total, and normalized transactions }
+        '404': { description: CURATED_WALLET_NOT_FOUND }
