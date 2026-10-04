@@ -14,7 +14,7 @@ const LIVE_ASSETS = [
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(10_000) });
-  if (!response.ok) throw new Error(`Market provider request failed with ${response.status}`);
+  if (!response.ok) throw new Error(`Market provider request failed with ${response.status} at ${new URL(url).pathname}`);
   return response.json();
 }
 
@@ -44,10 +44,9 @@ export async function refreshMarket(apiKey) {
   if (!apiKey) return null;
   const ids = LIVE_ASSETS.map((asset) => asset.coinId);
   const headers = { 'x-cg-demo-api-key': apiKey };
-  const [prices, ...charts] = await Promise.all([
-    fetchJson(`${COINGECKO}/simple/price?ids=${ids.join(',')}&vs_currencies=usd&include_market_cap=true&include_24hr_vol=true&include_24hr_change=true&include_last_updated_at=true`, { headers }),
-    ...LIVE_ASSETS.map((asset) => fetchJson(`${COINGECKO}/coins/${asset.coinId}/market_chart?vs_currency=usd&days=365`, { headers }))
-  ]);
+  const prices = await fetchJson(`${COINGECKO}/simple/price?ids=${ids.join(',')}&vs_currencies=usd&include_market_cap=true&include_24hr_vol=true&include_24hr_change=true&include_last_updated_at=true`, { headers });
+  const charts = [];
+  for (const asset of LIVE_ASSETS) charts.push(await fetchJson(`${COINGECKO}/coins/${asset.coinId}/market_chart?vs_currency=usd&days=365`, { headers }));
   const dexPairs = await fetchJson(`${DEX_SCREENER}/tokens/v1/stacks/${LIVE_ASSETS.map((asset) => asset.dexAddress).join(',')}`);
   const assets = MARKET_SNAPSHOT.assets.map((asset) => ({ ...asset }));
 
