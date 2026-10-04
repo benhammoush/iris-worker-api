@@ -12,16 +12,15 @@ function routeFor(transactionEntry) {
   return DEX_ROUTES.find((route) => route.contractId === call?.contract_id && route.functions.has(call?.function_name));
 }
 
-function hasSwapEvent(transactionEntry) {
-  const transaction = transactionEntry.tx || transactionEntry;
-  return Array.isArray(transaction.events) && transaction.events.some((event) => /^swap(?:-|$)/i.test(event.action || ''));
-}
-
 export function isRegisteredDexSwap(transactionEntry) {
   const transaction = transactionEntry.tx || transactionEntry;
-  return transaction.tx_status === 'success' && Boolean(routeFor(transactionEntry)) && hasSwapEvent(transactionEntry);
+  return transaction.tx_status === 'success' && Boolean(routeFor(transactionEntry));
 }
 
 export function protocolForSwap(transactionEntry) {
   return routeFor(transactionEntry)?.protocol || null;
+}
+
+export function registeredDexRoutes() {
+  return DEX_ROUTES;
 }

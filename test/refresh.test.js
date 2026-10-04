@@ -19,9 +19,9 @@ test('refresh normalizes balances and transactions from the public Hiro endpoint
        if (value.endsWith('/stx_supply')) return { unlocked_stx: 1000000 };
        if (value.includes('/metadata/v1/ft?')) return { results: [] };
        if (value.includes('/metadata/v1/ft/')) return { symbol: 'ALEX', name: 'ALEX', decimals: 8, total_supply: '1', contract_principal: 'SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.age000-governance-token', image_uri: 'https://images.example/alex.png' };
-       if (value.includes('/extended/v1/tx?')) return { results: Array.from({ length: 60 }, (_, index) => ({
+       if (value.includes('.dlmm-swap-router-v-1-2/transactions?')) return { results: Array.from({ length: 60 }, (_, index) => ({
          tx_id: `chain-${index}`, burn_block_time_iso: `2026-01-01T00:${String(index % 60).padStart(2, '0')}:00.000Z`, block_height: index,
-         tx_type: 'contract_call', tx_status: 'success', contract_call: { contract_id: 'SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-swap-router-v-1-2', function_name: 'swap-y-for-x-simple-range-multi' }, events: [{ action: 'swap-y-for-x' }]
+         tx_type: 'contract_call', tx_status: 'success', contract_call: { contract_id: 'SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-swap-router-v-1-2', function_name: 'swap-y-for-x-simple-range-multi' }
        })) };
       const wallet = wallets.find(({ address }) => value.includes(address));
       if (value.includes('/balances')) return {
@@ -67,7 +67,7 @@ test('refresh normalizes balances and transactions from the public Hiro endpoint
     assert.equal(demoA.totalValue, demoA.portfolioTotal);
     assert.ok(requests.every((url) => url.startsWith('https://api.mainnet.hiro.so/')));
     assert.equal(requests.filter((url) => url.includes('/transactions_with_transfers?limit=100&offset=0')).length, 3);
-    assert.equal(requests.filter((url) => url.includes('/extended/v1/tx?limit=20&offset=')).length, 3);
+    assert.equal(requests.filter((url) => url.includes('.dlmm-swap-router-v-1-2/transactions?limit=20&offset=')).length, 3);
     assert.equal(requests.some((url) => url.includes('/metadata/')), true);
     assert.equal(requests.some((url) => url.includes('alexgo.io')), false);
     assert.equal(snapshot.market.history.length, snapshot.assets.length);

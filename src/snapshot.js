@@ -1,7 +1,7 @@
 import { FIXTURE_SNAPSHOT, MARKET_SNAPSHOT } from './fixtures.js';
 import { FRESH_AFTER_MS, GLOBAL_TRANSACTION_SCAN_PAGES, MAX_CATALOG_ASSETS, MAX_DISCOVERED_ASSETS, MAX_GLOBAL_TRANSACTION_SCAN, MAX_SWAPS, MAX_TRANSACTIONS_PER_WALLET, MAX_TRANSACTION_SCAN_PER_WALLET, SNAPSHOT_KEY_PREFIX, SNAPSHOT_POINTER_KEY, STALE_AFTER_MS } from './constants.js';
 import { refreshMarket } from './market.js';
-import { isRegisteredDexSwap, protocolForSwap } from './dexRegistry.js';
+import { isRegisteredDexSwap, protocolForSwap, registeredDexRoutes } from './dexRegistry.js';
 
 const HIRO = 'https://api.mainnet.hiro.so';
 
@@ -187,9 +187,11 @@ async function fetchCuratedMetadata() {
 async function fetchGlobalSwaps() {
   const swaps = [];
   try {
-    for (let page = 0; page < GLOBAL_TRANSACTION_SCAN_PAGES; page += 1) {
-      const payload = await fetchJson(`${HIRO}/extended/v1/tx?limit=${MAX_GLOBAL_TRANSACTION_SCAN}&offset=${page * MAX_GLOBAL_TRANSACTION_SCAN}`);
-      swaps.push(...(payload.results || []).filter(isRegisteredDexSwap).map((transaction) => normalizeSwap(null, transaction)));
+    for (const route of registeredDexRoutes()) {
+      for (let page = 0; page < GLOBAL_TRANSACTION_SCAN_PAGES; page += 1) {
+        const payload = await fetchJson(`${HIRO}/extended/v1/address/${route.contractId}/transactions?limit=${MAX_GLOBAL_TRANSACTION_SCAN}&offset=${page * MAX_GLOBAL_TRANSACTION_SCAN}`);
+        swaps.push(...(payload.results || []).filter(isRegisteredDexSwap).map((transaction) => normalizeSwap(null, transaction)));
+      }
     }
     return { swaps, error: null, asOf: new Date().toISOString() };
   } catch (cause) {
@@ -297,7 +299,7 @@ export async function refreshSnapshot(env, config, now = new Date()) {
       asOf: refreshedMarket?.asOf || MARKET_SNAPSHOT.asOf,
       historySource: refreshedMarket?.historySource || 'snapshot',
       liveAssetCount: refreshedMarket?.liveAssetCount || 0,
-      swaps: { count: swaps.length, asOf: globalSwapResult.asOf, source: 'hiro', error: globalSwapResult.error },
+      swaps: { count: swaps.length, asOf: globalSwapResult.asOf, source: 'hiro-dex-contracts', error: globalSwapResult.error },
       history: assets.map((asset) => ({ symbol: asset.symbol, points: asset.priceHistory }))
     },
     assets,
