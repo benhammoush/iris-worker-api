@@ -1,26 +1,26 @@
-// Contract and function pairs are deliberately explicit. A matching function name
-// on an unknown contract is not enough evidence to classify a transaction as a swap.
+// This intentionally small allow-list is for swaps through tracked pools only.
+// It is not evidence of, or a scanner for, all activity on a Solana DEX.
 const DEX_ROUTES = [{
-  protocol: 'ALEX DLMM',
-  contractId: 'SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-swap-router-v-1-2',
-  functions: new Set(['swap-y-for-x-simple-range-multi'])
+  protocol: 'Raydium AMM',
+  source: 'RAYDIUM',
+  programId: '675kPX9MHTjS2zt1qfr1NYHuzefQfuvLoV8fK5b1Mp8',
+  pools: new Set(['58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2'])
 }];
 
-function routeFor(transactionEntry) {
-  const transaction = transactionEntry.tx || transactionEntry;
-  const call = transaction.contract_call;
-  return DEX_ROUTES.find((route) => route.contractId === call?.contract_id && route.functions.has(call?.function_name));
+function routeFor(transaction) {
+  if (transaction?.type !== 'SWAP') return null;
+  return DEX_ROUTES.find((route) => transaction.source === route.source
+    && (transaction.accountData || []).some((account) => route.pools.has(account.account) || account.account === route.programId));
 }
 
-export function isRegisteredDexSwap(transactionEntry) {
-  const transaction = transactionEntry.tx || transactionEntry;
-  return transaction.tx_status === 'success' && Boolean(routeFor(transactionEntry));
+export function isRegisteredDexSwap(transaction) {
+  return Boolean(routeFor(transaction));
 }
 
-export function protocolForSwap(transactionEntry) {
-  return routeFor(transactionEntry)?.protocol || null;
+export function protocolForSwap(transaction) {
+  return routeFor(transaction)?.protocol || null;
 }
 
 export function registeredDexRoutes() {
-  return DEX_ROUTES;
+  return DEX_ROUTES.map(({ pools, ...route }) => ({ ...route, pools: [...pools] }));
 }

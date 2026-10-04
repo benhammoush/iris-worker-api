@@ -1,33 +1,31 @@
 import { FIXTURE_SNAPSHOT, MARKET_SNAPSHOT } from './fixtures.js';
-import { FRESH_AFTER_MS, GLOBAL_TRANSACTION_SCAN_PAGES, MAX_CATALOG_ASSETS, MAX_DISCOVERED_ASSETS, MAX_GLOBAL_TRANSACTION_SCAN, MAX_SWAPS, MAX_TRANSACTIONS_PER_WALLET, MAX_TRANSACTION_SCAN_PER_WALLET, SNAPSHOT_KEY_PREFIX, SNAPSHOT_POINTER_KEY, STALE_AFTER_MS } from './constants.js';
+import { FRESH_AFTER_MS, MAX_DISCOVERED_ASSETS, MAX_SWAPS, MAX_TRACKED_POOL_TRANSACTIONS, MAX_TRANSACTIONS_PER_WALLET, MAX_TRANSACTION_SCAN_PER_WALLET, SNAPSHOT_KEY_PREFIX, SNAPSHOT_POINTER_KEY, SOL_MINT, STALE_AFTER_MS, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from './constants.js';
 import { refreshMarket } from './market.js';
 import { isRegisteredDexSwap, protocolForSwap, registeredDexRoutes } from './dexRegistry.js';
+import { addAtomicAmounts, assetIdentity, decimalValue, formatAtomicAmount, isBase58PublicKey } from './transforms.js';
 
-const HIRO = 'https://api.mainnet.hiro.so';
+const HELIUS_RPC = 'https://mainnet.helius-rpc.com/';
+const HELIUS_ENHANCED = 'https://api.helius.xyz/v0';
 
-async function fetchJson(url, hiroApiKey) {
-  const response = await fetch(url, { headers: hiroApiKey ? { 'x-api-key': hiroApiKey } : undefined, signal: AbortSignal.timeout(10_000) });
-  if (!response.ok) {
-    const error = new Error(`Upstream request failed with ${response.status}`);
-    error.status = response.status;
-    throw error;
-  }
+async function heliusRpc(method, params, apiKey) {
+  const response = await fetch(`${HELIUS_RPC}?api-key=${encodeURIComponent(apiKey)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: method, method, params }), signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error(`Helius RPC request failed with ${response.status}`);
+  const payload = await response.json();
+  if (payload.error) throw new Error(`Helius RPC error: ${payload.error.message || 'unknown'}`);
+  return payload.result;
+}
+
+async function heliusEnhanced(path, apiKey) {
+  const response = await fetch(`${HELIUS_ENHANCED}${path}${path.includes('?') ? '&' : '?'}api-key=${encodeURIComponent(apiKey)}`, { signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error(`Helius enhanced request failed with ${response.status}`);
   return response.json();
 }
 
 export function isUsableSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object' || !Number.isFinite(Date.parse(snapshot.createdAt))) return false;
-  return snapshot.market && typeof snapshot.market === 'object'
-    && typeof snapshot.market.source === 'string' && Number.isFinite(Date.parse(snapshot.market.asOf))
-    && Array.isArray(snapshot.assets)
-    && snapshot.assets.every((asset) => asset && typeof asset === 'object' && typeof asset.symbol === 'string'
-      && typeof asset.name === 'string' && typeof asset.imageUrl === 'string' && typeof asset.contractId === 'string'
-      && Number.isFinite(Number(asset.decimals)) && asset.price !== undefined && asset.supply !== undefined
-      && asset.totalSupply !== undefined && asset.marketCap !== undefined && asset.change24h !== undefined
-      && asset.change7d !== undefined && asset.change30d !== undefined && Array.isArray(asset.priceHistory)
-      && asset.priceHistory.every((point) => point && point.date !== undefined && point.price !== undefined))
-    && snapshot.wallets && typeof snapshot.wallets === 'object' && !Array.isArray(snapshot.wallets)
-    && Array.isArray(snapshot.swaps);
+  return snapshot.market && typeof snapshot.market === 'object' && typeof snapshot.market.source === 'string' && Number.isFinite(Date.parse(snapshot.market.asOf))
+    && Array.isArray(snapshot.assets) && snapshot.assets.every((asset) => asset && typeof asset.symbol === 'string' && typeof asset.name === 'string' && typeof asset.mint === 'string' && isBase58PublicKey(asset.mint) && asset.contractId === asset.mint && Array.isArray(asset.priceHistory))
+    && snapshot.wallets && typeof snapshot.wallets === 'object' && !Array.isArray(snapshot.wallets) && Array.isArray(snapshot.swaps);
 }
 
 export async function resolveSnapshot(kv, now = Date.now()) {
@@ -41,272 +39,112 @@ export async function resolveSnapshot(kv, now = Date.now()) {
   return { snapshot, state: age <= FRESH_AFTER_MS ? 'fresh' : 'stale' };
 }
 
-function normalizeSwap(wallet, transactionEntry) {
-  const transaction = transactionEntry.tx || transactionEntry;
-  const contractCall = transaction.contract_call || {};
+function normalizeTokenChange(change) {
+  const rawAmount = change.rawTokenAmount?.tokenAmount ?? change.tokenAmount ?? change.rawAmount ?? change.amount ?? '0';
+  return { mint: change.mint, assetId: change.mint, rawAmount: String(rawAmount), decimals: change.rawTokenAmount?.decimals ?? change.decimals ?? null, userAccount: change.userAccount ?? change.fromUserAccount ?? change.toUserAccount ?? null };
+}
+
+function normalizeTransaction(transaction) {
   return {
-    id: transaction.tx_id,
-    txId: transaction.tx_id,
+    id: transaction.signature, txId: transaction.signature, chain: 'solana', timestamp: transaction.timestamp ? new Date(transaction.timestamp * 1000).toISOString() : null,
+    blockHeight: transaction.slot ?? null, type: transaction.type ?? null, status: transaction.transactionError ? 'failed' : 'success', source: transaction.source ?? null,
+    nativeTransfers: (transaction.nativeTransfers || []).map((transfer) => ({ ...transfer, amount: String(transfer.amount ?? '0') })),
+    tokenTransfers: (transaction.tokenTransfers || []).map(normalizeTokenChange)
+  };
+}
+
+function normalizeSwap(wallet, transaction) {
+  const swap = transaction.events?.swap || {};
+  const input = swap.tokenInputs?.[0] || swap.nativeInput;
+  const output = swap.tokenOutputs?.[0] || swap.nativeOutput;
+  return {
+    ...normalizeTransaction(transaction),
     wallet,
-    protocol: protocolForSwap(transactionEntry),
-    timestamp: transaction.burn_block_time_iso ?? transaction.block_time_iso ?? transaction.burn_block_time ?? transaction.block_time ?? null,
-    blockHeight: transaction.block_height ?? null,
-    contractId: contractCall.contract_id ?? null,
-    functionName: contractCall.function_name ?? null,
-    status: transaction.tx_status ?? null,
-    input: null,
-    output: null,
+    protocol: protocolForSwap(transaction),
+    input: input ? normalizeTokenChange(input) : null,
+    output: output ? normalizeTokenChange(output) : null,
     side: null,
     value: null
   };
 }
 
-function normalizeTransfers(transfers = []) {
-  return transfers.map((transfer) => ({
-    asset: transfer.asset_identifier ?? 'STX',
-    amountAtomic: String(transfer.amount ?? '1'),
-    amount: String(transfer.amount ?? '1'),
-    sender: transfer.sender ?? null,
-    recipient: transfer.recipient ?? null
-  }));
-}
-
-function normalizeTransaction(transactionEntry) {
-  const transaction = transactionEntry.tx || transactionEntry;
-  const stxTransfers = normalizeTransfers(transactionEntry.stx_transfers ?? transaction.stx_transfers);
-  const ftTransfers = normalizeTransfers(transactionEntry.ft_transfers ?? transaction.ft_transfers);
-  const nftTransfers = normalizeTransfers(transactionEntry.nft_transfers ?? transaction.nft_transfers);
-  return {
-    id: transaction.tx_id,
-    txId: transaction.tx_id,
-    timestamp: transaction.burn_block_time_iso ?? transaction.block_time_iso ?? transaction.burn_block_time ?? transaction.block_time ?? null,
-    blockHeight: transaction.block_height ?? null,
-    type: transaction.tx_type ?? null,
-    status: transaction.tx_status ?? null,
-    transfers: { stx: stxTransfers, fungible: ftTransfers, nft: nftTransfers },
-    stxTransfers,
-    ftTransfers,
-    nftTransfers
-  };
-}
-
-function assetContractId(assetIdentifier) {
-  return assetIdentifier.split('::')[0];
-}
-
-function safeImageUrl(value) {
-  if (typeof value !== 'string' || !value) return '';
-  if (value.startsWith('ipfs://')) return `https://ipfs.io/ipfs/${value.slice(7).replace(/^ipfs\//, '')}`;
-  try { return new URL(value).protocol === 'https:' ? value : ''; } catch { return ''; }
-}
-
-async function discoverAssets(balancePayloads, knownAssets, hiroApiKey) {
-  const knownContractIds = new Set(knownAssets.map((asset) => asset.contractId));
-  const contractIds = [...new Set(balancePayloads.flatMap((balances) => Object.keys(balances.fungible_tokens || {}).map(assetContractId)))]
-    .filter((contractId) => !knownContractIds.has(contractId))
-    .slice(0, MAX_DISCOVERED_ASSETS);
-  const discovered = await Promise.all(contractIds.map(async (contractId) => {
-    try {
-      const metadata = await fetchJson(`${HIRO}/metadata/v1/ft/${encodeURIComponent(contractId)}`, hiroApiKey);
-      const decimals = Number(metadata.decimals);
-      if (!Number.isInteger(decimals) || decimals < 0) return null;
-      const symbol = metadata.symbol || contractId.split('.')[1];
-      return {
-        symbol,
-        name: metadata.name || symbol,
-        imageUrl: safeImageUrl(metadata.image_canonical_uri || metadata.image_thumbnail_uri || metadata.image_uri),
-        contractId,
-        decimals,
-        price: null,
-        supply: null,
-        totalSupply: metadata.total_supply ?? null,
-        marketCap: null,
-        change24h: null,
-        change7d: null,
-        change30d: null,
-        priceHistory: [],
-        metadataSource: 'hiro',
-        marketDataSource: null,
-        historyDataSource: null
-      };
-    } catch (cause) {
-      console.warn('Token metadata unavailable', { contractId, message: cause.message });
-      return null;
-    }
-  }));
-  return discovered.filter(Boolean);
-}
-
-function assetFromMetadata(metadata) {
-  const contractId = metadata.contract_principal || assetContractId(metadata.asset_identifier || '');
-  const decimals = Number(metadata.decimals);
-  if (!contractId || !Number.isInteger(decimals) || decimals < 0) return null;
-  const symbol = metadata.symbol || contractId.split('.')[1];
-  return {
-    symbol,
-    name: metadata.name || symbol,
-    imageUrl: safeImageUrl(metadata.image_canonical_uri || metadata.image_thumbnail_uri || metadata.image_uri),
-    contractId,
-    decimals,
-    price: null,
-    supply: null,
-    totalSupply: metadata.total_supply ?? null,
-    marketCap: null,
-    change24h: null,
-    change7d: null,
-    change30d: null,
-    priceHistory: [],
-    metadataSource: 'hiro',
-    marketDataSource: null,
-    historyDataSource: null
-  };
-}
-
-async function fetchTradableCandidates(hiroApiKey) {
-  try {
-    const payload = await fetchJson(`${HIRO}/metadata/v1/ft?valid_metadata_only=true&limit=${MAX_CATALOG_ASSETS}&offset=0`, hiroApiKey);
-    return (payload.results || []).map(assetFromMetadata).filter(Boolean);
-  } catch (cause) {
-    console.warn('Token catalog refresh unavailable', { message: cause.message });
-    return [];
-  }
-}
-
-async function fetchCuratedMetadata(hiroApiKey) {
-  const metadata = await Promise.all(MARKET_SNAPSHOT.assets.filter((asset) => asset.symbol !== 'STX').map(async (asset) => {
-    try {
-      return assetFromMetadata(await fetchJson(`${HIRO}/metadata/v1/ft/${encodeURIComponent(asset.contractId)}`, hiroApiKey));
-    } catch (cause) {
-      console.warn('Curated token metadata unavailable', { contractId: asset.contractId, message: cause.message });
-      return null;
-    }
-  }));
-  return metadata.filter(Boolean);
-}
-
-async function fetchGlobalSwaps(hiroApiKey) {
-  const swaps = [];
-  try {
-    for (const route of registeredDexRoutes()) {
-      for (let page = 0; page < GLOBAL_TRANSACTION_SCAN_PAGES; page += 1) {
-        const payload = await fetchJson(`${HIRO}/extended/v1/address/${route.contractId}/transactions?limit=${MAX_GLOBAL_TRANSACTION_SCAN}&offset=${page * MAX_GLOBAL_TRANSACTION_SCAN}`, hiroApiKey);
-        swaps.push(...(payload.results || []).filter(isRegisteredDexSwap).map((transaction) => normalizeSwap(null, transaction)));
-      }
-    }
-    return { swaps, error: null, asOf: new Date().toISOString() };
-  } catch (cause) {
-    console.warn('Global swap refresh unavailable', { message: cause.message });
-    const error = cause.name === 'TimeoutError' ? 'UPSTREAM_TIMEOUT' : cause.status === 429 ? 'UPSTREAM_RATE_LIMITED' : cause.status ? `UPSTREAM_HTTP_${cause.status}` : 'UPSTREAM_UNAVAILABLE';
-    return { swaps: [], error, asOf: null };
-  }
-}
-
-function numericBalance(rawBalance, decimals) {
-  const raw = Number(rawBalance);
-  const divisor = 10 ** decimals;
-  return Number.isFinite(raw) && Number.isFinite(divisor) ? raw / divisor : null;
-}
-
-function buildWalletAssets(balances, assets) {
-  const rawBalances = new Map([['STX', balances.stx?.balance]]);
-  for (const [contractId, balance] of Object.entries(balances.fungible_tokens || {})) rawBalances.set(contractId, balance?.balance);
-  return assets.flatMap((asset) => {
-    const rawBalance = asset.symbol === 'STX'
-      ? rawBalances.get('STX')
-      : [...rawBalances.entries()].find(([contractId]) => contractId === asset.contractId || contractId.startsWith(`${asset.contractId}::`))?.[1];
-    if (typeof rawBalance !== 'string' || !/^\d+$/.test(rawBalance)) return [];
-    const balance = numericBalance(rawBalance, asset.decimals);
-    const price = Number(asset.price);
-    if (balance === null) return [];
-    return [{
-      symbol: asset.symbol,
-      name: asset.name,
-      imageUrl: asset.imageUrl,
-      contractId: asset.contractId,
-      decimals: asset.decimals,
-      rawBalance,
-      balance,
-      price: asset.price,
-      value: Number.isFinite(price) ? price * rawBalance / 10 ** asset.decimals : null
-    }];
-  });
-}
-
-async function fetchWalletSource(wallet, hiroApiKey) {
-  const address = wallet.address;
-  const [balances, transactionPayload] = await Promise.all([
-    fetchJson(`${HIRO}/extended/v1/address/${address}/balances`, hiroApiKey),
-    fetchJson(`${HIRO}/extended/v1/address/${address}/transactions_with_transfers?limit=${MAX_TRANSACTION_SCAN_PER_WALLET}&offset=0`, hiroApiKey)
+async function fetchWalletSource(wallet, apiKey) {
+  const [balance, classicAccounts, token2022Accounts, transactions] = await Promise.all([
+    heliusRpc('getBalance', [wallet.address], apiKey),
+    heliusRpc('getTokenAccountsByOwner', [wallet.address, { programId: TOKEN_PROGRAM_ID }, { encoding: 'jsonParsed' }], apiKey),
+    heliusRpc('getTokenAccountsByOwner', [wallet.address, { programId: TOKEN_2022_PROGRAM_ID }, { encoding: 'jsonParsed' }], apiKey),
+    heliusEnhanced(`/addresses/${wallet.address}/transactions?limit=${MAX_TRANSACTION_SCAN_PER_WALLET}`, apiKey)
   ]);
-  return { balances, transactions: transactionPayload.results || [] };
+  const accountInfos = [...(classicAccounts.value || []), ...(token2022Accounts.value || [])].map((account) => account.account?.data?.parsed?.info).filter(Boolean);
+  const grouped = new Map();
+  for (const info of accountInfos) {
+    const current = grouped.get(info.mint) || { amounts: [], decimals: info.tokenAmount?.decimals ?? 0 };
+    current.amounts.push(String(info.tokenAmount?.amount ?? '0'));
+    grouped.set(info.mint, current);
+  }
+  const tokenBalances = [...grouped.entries()].flatMap(([mint, value]) => {
+    const rawAmount = addAtomicAmounts(value.amounts);
+    return rawAmount === null || rawAmount === '0' ? [] : [{ mint, rawAmount, decimals: value.decimals }];
+  });
+  return { nativeRawAmount: String(balance.value ?? '0'), tokenBalances, transactions: Array.isArray(transactions) ? transactions : [] };
+}
+
+async function fetchTrackedPoolSwaps(apiKey) {
+  const routes = registeredDexRoutes();
+  const results = await Promise.allSettled(routes.flatMap((route) => route.pools.map((pool) => heliusEnhanced(`/addresses/${pool}/transactions?limit=${MAX_TRACKED_POOL_TRANSACTIONS}`, apiKey))));
+  const bySignature = new Map();
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    for (const transaction of result.value) {
+      if (isRegisteredDexSwap(transaction) && transaction.signature) bySignature.set(transaction.signature, transaction);
+    }
+  }
+  return [...bySignature.values()].map((transaction) => normalizeSwap(null, transaction));
+}
+
+function fallbackAsset(mint, decimals = 0) {
+  const existing = MARKET_SNAPSHOT.assets.find((asset) => asset.mint === mint);
+  return existing || { ...assetIdentity(mint), symbol: mint.slice(0, 8), name: mint, imageUrl: '', decimals, price: null, supply: null, totalSupply: null, marketCap: null, change24h: null, change7d: null, change30d: null, priceHistory: [], actualprice: null, image: '', marketcap: null, pricedayminusone: null, percentdayminusone: null, priceweekminusone: null, percentweekminusone: null, pricemonthminusone: null, percentmonthminusone: null, contractname: mint };
 }
 
 function buildWalletData(wallet, source, assets) {
-  if (!source) return { label: wallet.label, description: wallet.description, assets: [], totalValue: 0, portfolioTotal: 0, activity: [], transactions: [], swaps: [] };
-  const transactions = source.transactions.slice(0, MAX_TRANSACTIONS_PER_WALLET);
-  const walletAssets = buildWalletAssets(source.balances, assets);
-  const activity = transactions.map(normalizeTransaction);
-  const swaps = source.transactions
-    .filter(isRegisteredDexSwap)
-    .map((transaction) => normalizeSwap(wallet.address, transaction));
-  const totalValue = walletAssets.reduce((total, asset) => total + (Number.isFinite(asset.value) ? asset.value : 0), 0);
-  return {
-    label: wallet.label,
-    description: wallet.description,
-    assets: walletAssets,
-    totalValue,
-    portfolioTotal: totalValue,
-    activity,
-    transactions: activity,
-    swaps
-  };
+  if (!source) return { label: wallet.label, description: wallet.description, chain: 'solana', assets: [], totalValue: 0, portfolioTotal: 0, activity: [], transactions: [], swaps: [] };
+  const balances = [{ mint: SOL_MINT, rawAmount: source.nativeRawAmount, decimals: 9 }, ...source.tokenBalances];
+  const assetByMint = new Map(assets.map((asset) => [asset.mint, asset]));
+  const walletAssets = balances.map(({ mint, rawAmount, decimals }) => {
+    const asset = assetByMint.get(mint) || fallbackAsset(mint, decimals);
+    const displayBalance = formatAtomicAmount(rawAmount, asset.decimals);
+    const numericBalance = decimalValue(displayBalance);
+    const price = typeof asset.price === 'number' ? asset.price : null;
+    return { ...assetIdentity(mint), symbol: asset.symbol, name: asset.name, imageUrl: asset.imageUrl, decimals: asset.decimals, rawBalance: rawAmount, balance: displayBalance, displayBalance, price, value: numericBalance === null || price === null ? null : numericBalance * price };
+  });
+  const transactions = source.transactions.slice(0, MAX_TRANSACTIONS_PER_WALLET).map(normalizeTransaction);
+  const swaps = source.transactions.filter(isRegisteredDexSwap).map((transaction) => normalizeSwap(wallet.address, transaction));
+  const totalValue = walletAssets.reduce((total, asset) => total + (typeof asset.value === 'number' ? asset.value : 0), 0);
+  return { label: wallet.label, description: wallet.description, chain: 'solana', assets: walletAssets, totalValue, portfolioTotal: totalValue, activity: transactions, transactions, swaps };
 }
 
 export async function refreshSnapshot(env, config, now = new Date()) {
-  const hiroApiKey = env.HIRO_API_KEY;
-  const [feesResult, infoResult, stxSupplyResult, walletResults, catalogCandidates, curatedMetadata, globalSwapResult] = await Promise.all([
-    fetchJson(`${HIRO}/extended/v2/mempool/fees`, hiroApiKey).catch((cause) => { console.warn('Fee refresh unavailable', { message: cause.message }); return null; }),
-    fetchJson(`${HIRO}/v2/info`, hiroApiKey).catch((cause) => { console.warn('Chain info refresh unavailable', { message: cause.message }); return null; }),
-    fetchJson(`${HIRO}/extended/v1/stx_supply`, hiroApiKey).catch((cause) => { console.warn('STX supply refresh unavailable', { message: cause.message }); return null; }),
-    Promise.allSettled(config.wallets.map(async (wallet) => [wallet.address, await fetchWalletSource(wallet, hiroApiKey)])),
-    fetchTradableCandidates(hiroApiKey),
-    fetchCuratedMetadata(hiroApiKey),
-    fetchGlobalSwaps(hiroApiKey)
+  const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
+  if (!apiKey) {
+    const snapshot = { ...FIXTURE_SNAPSHOT, createdAt: now.toISOString() };
+    await env.SNAPSHOTS.put(`${SNAPSHOT_KEY_PREFIX}${now.getTime()}`, JSON.stringify(snapshot));
+    await env.SNAPSHOTS.put(SNAPSHOT_POINTER_KEY, JSON.stringify({ key: `${SNAPSHOT_KEY_PREFIX}${now.getTime()}`, createdAt: snapshot.createdAt }));
+    return snapshot;
+  }
+  const [results, trackedPoolResult, slotResult] = await Promise.all([
+    Promise.allSettled(config.wallets.map(async (wallet) => [wallet.address, await fetchWalletSource(wallet, apiKey)])),
+    fetchTrackedPoolSwaps(apiKey).catch((cause) => { console.warn('Tracked pool swaps unavailable', { message: cause.message }); return []; }),
+    heliusRpc('getSlot', [{ commitment: 'finalized' }], apiKey).catch(() => null)
   ]);
-  const fees = feesResult;
-  const info = infoResult || {};
-  const stxSupply = stxSupplyResult || {};
-  const walletSources = walletResults.filter((result) => result.status === 'fulfilled').map((result) => result.value);
-  const discoveredAssets = await discoverAssets(walletSources.map(([, source]) => source.balances), MARKET_SNAPSHOT.assets, hiroApiKey);
-  const refreshedMarket = await refreshMarket(env.COINGECKO_DEMO_API_KEY, [...catalogCandidates, ...curatedMetadata, ...discoveredAssets]);
-  const marketAssets = refreshedMarket?.assets || [...MARKET_SNAPSHOT.assets, ...discoveredAssets];
-  const assets = refreshedMarket ? marketAssets.filter((asset) => asset.symbol === 'STX' || asset.marketDataSource) : marketAssets;
-  const sourcesByAddress = Object.fromEntries(walletSources);
-  const walletEntries = config.wallets.map((wallet) => [wallet.address, buildWalletData(wallet, sourcesByAddress[wallet.address], assets)]);
-  const wallets = Object.fromEntries(walletEntries);
-  const swaps = globalSwapResult.swaps
-    .sort((left, right) => String(right.timestamp ?? '').localeCompare(String(left.timestamp ?? '')))
-    .slice(0, MAX_SWAPS);
-  const snapshot = {
-    version: 1,
-    createdAt: now.toISOString(),
-    source: 'hybrid',
-    market: {
-      fees,
-      stacksTipHeight: info.stacks_tip_height,
-      block_height: info.stacks_tip_height,
-      stxSupply: stxSupply.unlocked_stx,
-      source: refreshedMarket?.source || MARKET_SNAPSHOT.source,
-      asOf: refreshedMarket?.asOf || MARKET_SNAPSHOT.asOf,
-      historySource: refreshedMarket?.historySource || 'snapshot',
-      liveAssetCount: refreshedMarket?.liveAssetCount || 0,
-      swaps: { count: swaps.length, asOf: globalSwapResult.asOf, source: 'hiro-dex-contracts', error: globalSwapResult.error },
-      history: assets.map((asset) => ({ symbol: asset.symbol, points: asset.priceHistory }))
-    },
-    assets,
-    wallets,
-    swaps
-  };
+  const sources = Object.fromEntries(results.filter((result) => result.status === 'fulfilled').map((result) => result.value));
+  const mints = [...new Set([SOL_MINT, ...Object.values(sources).flatMap((source) => source.tokenBalances.map((balance) => balance.mint))])].slice(0, MAX_DISCOVERED_ASSETS);
+  const market = await refreshMarket(config.jupiterApiKey || env.JUPITER_API_KEY, mints);
+  const marketAssetsByMint = new Map((market?.assets || []).map((asset) => [asset.mint, asset]));
+  const assets = mints.map((mint) => marketAssetsByMint.get(mint) || fallbackAsset(mint));
+  const wallets = Object.fromEntries(config.wallets.map((wallet) => [wallet.address, buildWalletData(wallet, sources[wallet.address], assets)]));
+  const swaps = trackedPoolResult.sort((left, right) => String(right.timestamp ?? '').localeCompare(String(left.timestamp ?? ''))).slice(0, MAX_SWAPS);
+  const snapshot = { version: 2, createdAt: now.toISOString(), source: market ? 'helius-jupiter' : 'helius', market: { fees: null, slot: slotResult, block_height: slotResult, source: market?.source || 'fixture', asOf: market?.asOf || MARKET_SNAPSHOT.asOf, historySource: market?.historySource || null, liveAssetCount: market?.liveAssetCount || 0, swaps: { count: swaps.length, asOf: new Date().toISOString(), source: 'helius-decoded-tracked-pools', scope: 'registered-liquid-pools', error: null }, history: assets.map((asset) => ({ mint: asset.mint, symbol: asset.symbol, points: asset.priceHistory })) }, assets, wallets, swaps };
   const key = `${SNAPSHOT_KEY_PREFIX}${now.getTime()}`;
   await env.SNAPSHOTS.put(key, JSON.stringify(snapshot));
   await env.SNAPSHOTS.put(SNAPSHOT_POINTER_KEY, JSON.stringify({ key, createdAt: snapshot.createdAt }));

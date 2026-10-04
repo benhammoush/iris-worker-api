@@ -1,40 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { SOL_MINT } from '../src/constants.js';
 import { refreshMarket } from '../src/market.js';
 
-test('market refresh combines CoinGecko history with the most liquid Stacks pair', async () => {
+test('market refresh uses Jupiter token metadata and prices', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => {
-    const value = String(url);
-    if (value.includes('/market_chart')) return {
-      ok: true,
-      json: async () => ({ prices: [[Date.now() - 31 * 24 * 60 * 60 * 1000, 1], [Date.now() - 8 * 24 * 60 * 60 * 1000, 1], [Date.now() - 25 * 60 * 60 * 1000, 1], [Date.now(), 2]], market_caps: [[Date.now() - 31 * 24 * 60 * 60 * 1000, 10], [Date.now() - 8 * 24 * 60 * 60 * 1000, 10], [Date.now() - 25 * 60 * 60 * 1000, 10], [Date.now(), 20]], total_volumes: [[Date.now() - 31 * 24 * 60 * 60 * 1000, 30], [Date.now() - 8 * 24 * 60 * 60 * 1000, 30], [Date.now() - 25 * 60 * 60 * 1000, 30], [Date.now(), 40]] })
-    };
-    return {
-      ok: true,
-      json: async () => [
-        { baseToken: { address: 'SP102V8P0F7JX67ARQ77WEA3D3CFB5XW39REDT0AM.token-alex' }, priceUsd: '2.5', liquidity: { usd: 100 }, dexId: 'alex', pairAddress: 'low', url: 'https://dex.example/low' },
-        { baseToken: { address: 'SP102V8P0F7JX67ARQ77WEA3D3CFB5XW39REDT0AM.token-alex' }, priceUsd: '2.6', liquidity: { usd: 200 }, dexId: 'alex', pairAddress: 'high', url: 'https://dex.example/high', volume: { h24: 50 }, txns: { h24: { buys: 3, sells: 2 } } }
-      ]
-    };
-  };
+  globalThis.fetch = async (url) => ({ ok: true, json: async () => String(url).includes('/search?') ? [{ address: SOL_MINT, symbol: 'SOL', name: 'Solana', decimals: 9, icon: 'https://assets.example/sol.png' }] : { [SOL_MINT]: { usdPrice: 150, priceChange24h: 2.5 } } });
   try {
-    const market = await refreshMarket('demo-key');
-    const alex = market.assets.find((asset) => asset.symbol === 'ALEX');
-    assert.equal(market.source, 'mixed');
-    assert.equal(market.historySource, 'coingecko');
-    assert.equal(alex.price, 2.6);
-    assert.equal(alex.marketCap, '20');
-    assert.equal(alex.marketDataSource, 'dexscreener');
-    assert.equal(alex.historyDataSource, 'coingecko');
-    assert.equal(alex.dex.pairAddress, 'high');
-    assert.equal(alex.priceHistory[0].price, 1);
-    assert.equal(alex.priceHistory[0].marketCap, 10);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    const market = await refreshMarket('jupiter-key', [SOL_MINT]);
+    const sol = market.assets.find((asset) => asset.mint === SOL_MINT);
+    assert.equal(market.source, 'jupiter');
+    assert.equal(sol.price, 150);
+    assert.equal(sol.contractId, SOL_MINT);
+    assert.equal(sol.marketDataSource, 'jupiter');
+  } finally { globalThis.fetch = originalFetch; }
 });
 
-test('market refresh is disabled without a CoinGecko secret', async () => {
+test('market refresh falls back when no Jupiter key is configured', async () => {
   assert.equal(await refreshMarket(undefined), null);
 });

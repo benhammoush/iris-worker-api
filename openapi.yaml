@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 2.6.4
+  version: 3.0.0
 paths:
   /internal/refresh:
     post:
@@ -19,29 +19,29 @@ paths:
       responses:
         '200': { description: A usable resolved snapshot is available }
         '503': { description: Snapshot KV binding or resolved data is unavailable }
-  /v1/status:
+  /v2/status:
     get:
       responses:
-          '200': { description: API version, snapshot freshness, market source, and global Hiro swap scan count/status }
-  /v1/market:
+          '200': { description: API version, Solana snapshot freshness, market sources, and registered-pool swap status }
+  /v2/market:
     get:
       responses:
-        '200': { description: Live Hiro fees, latest Stacks tip and supply, plus CoinGecko/DexScreener market data when configured or snapshot fallback }
-  /v1/assets:
+          '200': { description: Finalized Solana slot plus Jupiter market data and GeckoTerminal 7-day history when available. }
+  /v2/assets:
     get:
       responses:
-          '200': { description: Tradable Stacks fungible tokens identified by full contract principal. Market changes are null when no verified provider history exists. }
-  /v1/assets/id/{contractId}:
+          '200': { description: Solana assets identified by canonical mint address. Market changes are null when no verified provider history exists. }
+  /v2/assets/mint/{mint}:
     get:
       parameters:
         - in: path
-          name: contractId
+          name: mint
           required: true
           schema: { type: string }
       responses:
-        '200': { description: Asset found by its canonical contract principal. }
+          '200': { description: Asset found by its canonical mint address. }
         '404': { description: Asset not found }
-  /v1/assets/{symbol}:
+  /v2/assets/{symbol}:
     get:
       parameters:
         - in: path
@@ -51,16 +51,16 @@ paths:
       responses:
         '200': { description: Asset }
         '404': { description: Asset not found }
-  /v1/swaps:
+  /v2/swaps:
     get:
       responses:
-          '200': { description: Recent chain-wide DEX transaction records from Hiro. input, output, side, and value are nullable until they can be proven. }
-  /v1/wallets:
+          '200': { description: Recent decoded swaps from the reviewed registered Solana pools only. This is not a chain-wide feed. }
+  /v2/wallets:
     get:
-      description: Returns metadata for the fixed public third-party demo wallet addresses; no wallet credentials are required.
+      description: Returns metadata for configured public Solana wallets.
       responses:
-        '200': { description: Metadata for the three public third-party demo wallets }
-  /v1/wallets/{address}:
+          '200': { description: Metadata for configured public wallets }
+  /v2/wallets/{address}:
     get:
       parameters:
         - in: path
@@ -68,7 +68,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
-          '200': { description: Cached public wallet balances, totalValue, and grouped activity. Atomic transfer amounts remain strings. portfolioTotal and transactions are compatibility aliases. }
+          '200': { description: Cached SOL/SPL/Token-2022 public balances, totalValue, and decoded activity. Atomic amounts remain strings. }
         '404': { description: CURATED_WALLET_NOT_FOUND }
 components:
   securitySchemes:

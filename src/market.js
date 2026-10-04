@@ -1,153 +1,71 @@
 import { MARKET_SNAPSHOT } from './fixtures.js';
-import { priceChangePercent } from './transforms.js';
+import { assetIdentity } from './transforms.js';
 
-const COINGECKO = 'https://api.coingecko.com/api/v3';
-const DEX_SCREENER = 'https://api.dexscreener.com';
+const JUPITER = 'https://api.jup.ag';
+const GECKOTERMINAL = 'https://api.geckoterminal.com/api/v2';
 
-const LIVE_ASSETS = [
-  { symbol: 'STX', coinId: 'blockstack', dexAddress: 'stx' },
-  { symbol: 'ALEX', coinId: 'alexgo', dexAddress: 'SP102V8P0F7JX67ARQ77WEA3D3CFB5XW39REDT0AM.token-alex' },
-  { symbol: 'WELSH', coinId: 'welsh-corgi-coin', dexAddress: 'SP3NE50GEXFG9SZGTT51P40X2CKYSZ5CC4ZTZ7A2G.welshcorgicoin-token' },
-  { symbol: 'LEO', coinId: 'leopold', dexAddress: 'SP1AY6K3PQV5MRT6R4S671NWW2FRVPKM0BR162CT6.leo-token' },
-  { symbol: 'aBTC', coinId: 'xlink-bridged-btc-stacks', dexAddress: 'SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.token-abtc' }
-];
-
-const definitionsByContract = new Map(LIVE_ASSETS.map((asset) => [asset.dexAddress, asset]));
-
-async function fetchJson(url, options = {}) {
-  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(10_000) });
-  if (!response.ok) throw new Error(`Market provider request failed with ${response.status} at ${new URL(url).pathname}`);
+async function fetchJson(url, apiKey) {
+  const response = await fetch(url, { headers: apiKey ? { 'x-api-key': apiKey } : undefined, signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error(`Jupiter request failed with ${response.status}`);
   return response.json();
 }
 
-function historyFrom(chart) {
-  return chart.prices.map(([timestamp, price], index) => ({
-    date: new Date(timestamp).toISOString(),
-    price,
-    marketCap: chart.market_caps[index]?.[1] ?? null,
-    volume: chart.total_volumes[index]?.[1] ?? null
-  }));
-}
-
-function bestDexPair(pairs, address) {
-  return pairs
-    .filter((pair) => pair.baseToken?.address === address && Number.isFinite(Number(pair.priceUsd)))
-    .sort((left, right) => Number(right.liquidity?.usd || 0) - Number(left.liquidity?.usd || 0))[0];
-}
-
-function nearestPrice(history, target) {
-  return history.reduce((closest, point) => {
-    if (!closest || Math.abs(Date.parse(point.date) - target) < Math.abs(Date.parse(closest.date) - target)) return point;
-    return closest;
-  }, null)?.price;
-}
-
-export async function refreshMarket(apiKey, discoveredAssets = []) {
-  if (!apiKey) return null;
-  const headers = { 'x-cg-demo-api-key': apiKey };
-  const charts = [];
-  for (const asset of LIVE_ASSETS) {
-    try {
-      charts.push(await fetchJson(`${COINGECKO}/coins/${asset.coinId}/market_chart?vs_currency=usd&days=365`, { headers }));
-    } catch (cause) {
-      console.warn('CoinGecko chart refresh unavailable', { symbol: asset.symbol, message: cause.message });
-      charts.push(null);
+async function mapWithConcurrency(items, limit, operation) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await operation(items[index]);
     }
   }
-  let dexPairs = [];
-  let dexAvailable = true;
-  try {
-    const addresses = [...new Set([...LIVE_ASSETS.map((asset) => asset.dexAddress), ...discoveredAssets.map((asset) => asset.contractId)])];
-    const batches = Array.from({ length: Math.ceil(addresses.length / 30) }, (_, index) => addresses.slice(index * 30, index * 30 + 30));
-    dexPairs = (await Promise.all(batches.map((batch) => fetchJson(`${DEX_SCREENER}/tokens/v1/stacks/${batch.join(',')}`)))).flat();
-  } catch (cause) {
-    dexAvailable = false;
-    console.warn('DexScreener refresh unavailable', { message: cause.message });
-  }
-  const assets = [...MARKET_SNAPSHOT.assets, ...discoveredAssets].reduce((unique, asset) => {
-    const existing = unique.get(asset.contractId);
-    unique.set(asset.contractId, existing ? {
-      ...existing,
-      ...asset,
-      imageUrl: asset.imageUrl || existing.imageUrl,
-      price: asset.price ?? existing.price,
-      supply: asset.supply ?? existing.supply,
-      totalSupply: asset.totalSupply ?? existing.totalSupply,
-      marketCap: asset.marketCap ?? existing.marketCap,
-      priceHistory: asset.priceHistory?.length ? asset.priceHistory : existing.priceHistory
-    } : { ...asset });
-    return unique;
-  }, new Map()).values();
-  const assetList = [...assets];
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
-  LIVE_ASSETS.forEach((definition, index) => {
-    const asset = assetList.find((item) => item.symbol === definition.symbol);
-    const history = charts[index] ? historyFrom(charts[index]) : [];
-    const latest = history.at(-1);
-    if (!asset || !latest) return;
-    const pair = bestDexPair(dexPairs, definition.dexAddress);
-    const price = Number(pair?.priceUsd ?? latest.price);
-    if (!Number.isFinite(price)) return;
-    const now = Date.now();
-    const dayPrice = nearestPrice(history, now - 24 * 60 * 60 * 1000);
-    const weekPrice = nearestPrice(history, now - 7 * 24 * 60 * 60 * 1000);
-    const monthPrice = nearestPrice(history, now - 30 * 24 * 60 * 60 * 1000);
-    asset.price = price;
-    asset.actualprice = price;
-    asset.marketCap = String(latest.marketCap ?? asset.marketCap);
-    asset.marketcap = asset.marketCap;
-    asset.change24h = Number.isFinite(Number(dayPrice)) ? priceChangePercent(price, dayPrice) : asset.change24h;
-    asset.change7d = Number.isFinite(Number(weekPrice)) ? priceChangePercent(price, weekPrice) : asset.change7d;
-    asset.change30d = Number.isFinite(Number(monthPrice)) ? priceChangePercent(price, monthPrice) : asset.change30d;
-    asset.percentdayminusone = asset.change24h;
-    asset.percentweekminusone = asset.change7d;
-    asset.percentmonthminusone = asset.change30d;
-    asset.priceHistory = history;
-    asset.marketDataSource = pair ? 'dexscreener' : 'coingecko';
-    asset.historyDataSource = 'coingecko';
-    asset.marketDataAsOf = latest.date;
-    asset.dex = pair ? {
-      name: pair.dexId,
-      pairAddress: pair.pairAddress,
-      url: pair.url,
-      liquidityUsd: pair.liquidity?.usd ?? null,
-      volume24h: pair.volume?.h24 ?? null,
-      buys24h: pair.txns?.h24?.buys ?? null,
-      sells24h: pair.txns?.h24?.sells ?? null
-    } : null;
-  });
-
-  // Wallet-discovered assets are included even without a CoinGecko listing. DexScreener
-  // can provide a current price and 24h change, but never a trustworthy 7d history.
-  assetList.forEach((asset) => {
-    if (definitionsByContract.has(asset.contractId)) return;
-    const pair = bestDexPair(dexPairs, asset.contractId);
-    if (!pair) return;
-    const price = Number(pair.priceUsd);
-    if (!Number.isFinite(price)) return;
-    asset.price = price;
-    asset.actualprice = price;
-    asset.change24h = Number.isFinite(Number(pair.priceChange?.h24)) ? Number(pair.priceChange.h24) : null;
-    asset.change7d = null;
-    asset.change30d = null;
-    asset.marketDataSource = 'dexscreener';
-    asset.marketDataAsOf = new Date().toISOString();
-    asset.dex = {
-      name: pair.dexId,
-      pairAddress: pair.pairAddress,
-      url: pair.url,
-      liquidityUsd: pair.liquidity?.usd ?? null,
-      volume24h: pair.volume?.h24 ?? null,
-      buys24h: pair.txns?.h24?.buys ?? null,
-      sells24h: pair.txns?.h24?.sells ?? null
-    };
-  });
-
+function tokenAsset(token, price) {
+  const mint = token.address || token.mint;
+  if (!mint) return null;
   return {
-    assets: assetList,
-    source: dexAvailable ? 'mixed' : 'coingecko',
-    asOf: new Date().toISOString(),
-    liveAssetCount: assetList.filter((asset) => asset.marketDataSource).length,
-    historySource: 'coingecko'
+    ...assetIdentity(mint), symbol: token.symbol || mint.slice(0, 8), name: token.name || token.symbol || mint,
+    imageUrl: token.icon || token.logoURI || '', decimals: Number.isInteger(token.decimals) ? token.decimals : 0,
+    price: typeof price?.usdPrice === 'number' ? price.usdPrice : null,
+    supply: null, totalSupply: token.supply ?? null, marketCap: price?.marketCap ?? null,
+    change24h: price?.priceChange24h ?? null, change7d: null, change30d: null, priceHistory: [],
+    actualprice: typeof price?.usdPrice === 'number' ? price.usdPrice : null, image: token.icon || token.logoURI || '',
+    marketcap: price?.marketCap ?? null, pricedayminusone: null, percentdayminusone: price?.priceChange24h ?? null,
+    priceweekminusone: null, percentweekminusone: null, pricemonthminusone: null, percentmonthminusone: null,
+    contractname: mint, metadataSource: 'jupiter', marketDataSource: price ? 'jupiter' : null, historyDataSource: null
   };
+}
+
+export async function refreshMarket(apiKey, candidateMints = []) {
+  if (!apiKey) return null;
+  const mints = [...new Set([...MARKET_SNAPSHOT.assets.map((asset) => asset.mint), ...candidateMints])];
+  try {
+    const [tokens, prices] = await Promise.all([
+      mapWithConcurrency(mints, 5, async (mint) => fetchJson(`${JUPITER}/tokens/v2/search?query=${encodeURIComponent(mint)}`, apiKey).then((payload) => (payload.data || payload || []).find((item) => (item.address || item.mint) === mint) || null)),
+      fetchJson(`${JUPITER}/price/v3?ids=${encodeURIComponent(mints.join(','))}`, apiKey)
+    ]);
+    const priceData = prices.data || prices;
+    const assets = tokens.map((token, index) => token ? tokenAsset(token, priceData[mints[index]]) : null).filter(Boolean);
+    await mapWithConcurrency(assets, 5, async (asset) => {
+      try {
+        const history = await fetchJson(`${GECKOTERMINAL}/networks/solana/tokens/${encodeURIComponent(asset.mint)}/ohlcv/day?aggregate=1&limit=7&currency=usd`);
+        const candles = history?.data?.attributes?.ohlcv_list;
+        if (!Array.isArray(candles)) return;
+        asset.priceHistory = candles.map(([timestamp, _open, _high, _low, close]) => ({ date: new Date(timestamp * 1000).toISOString(), price: close })).reverse();
+        asset.historyDataSource = 'geckoterminal';
+        const oldest = asset.priceHistory[0]?.price;
+        if (typeof asset.price === 'number' && typeof oldest === 'number' && oldest > 0) asset.change7d = ((asset.price - oldest) / oldest) * 100;
+      } catch (cause) {
+        console.warn('GeckoTerminal history unavailable', { mint: asset.mint, message: cause.message });
+      }
+    });
+    return { assets, source: 'jupiter', asOf: new Date().toISOString(), liveAssetCount: assets.filter((asset) => asset.marketDataSource).length, historySource: assets.some((asset) => asset.historyDataSource === 'geckoterminal') ? 'geckoterminal' : null };
+  } catch (cause) {
+    console.warn('Jupiter market refresh unavailable', { message: cause.message });
+    return null;
+  }
 }

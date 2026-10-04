@@ -1,55 +1,53 @@
-export function supplyFromAtomic(totalSupply, decimals) {
-  return totalSupply / Math.pow(10, decimals);
+import { CHAIN, SOL_MINT } from './constants.js';
+
+const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+export function isBase58PublicKey(value) {
+  if (typeof value !== 'string' || value.length < 32 || value.length > 44 || ![...value].every((character) => BASE58.includes(character))) return false;
+  let bytes = [0];
+  for (const character of value) {
+    let carry = BASE58.indexOf(character);
+    for (let index = 0; index < bytes.length; index += 1) {
+      carry += bytes[index] * 58;
+      bytes[index] = carry & 255;
+      carry >>= 8;
+    }
+    while (carry) { bytes.push(carry & 255); carry >>= 8; }
+  }
+  const leadingZeroes = value.match(/^1*/)[0].length;
+  const encodedBytes = bytes.length === 1 && bytes[0] === 0 ? 0 : bytes.length;
+  return leadingZeroes + encodedBytes === 32;
+}
+
+export function formatAtomicAmount(rawAmount, decimals) {
+  if (typeof rawAmount !== 'string' || !/^\d+$/.test(rawAmount) || !Number.isInteger(decimals) || decimals < 0) return null;
+  const digits = rawAmount.padStart(decimals + 1, '0');
+  if (decimals === 0) return digits;
+  const whole = digits.slice(0, -decimals);
+  const fraction = digits.slice(-decimals).replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
+export function addAtomicAmounts(amounts) {
+  try {
+    return amounts.reduce((total, amount) => total + BigInt(amount), 0n).toString();
+  } catch {
+    return null;
+  }
+}
+
+export function decimalValue(value) {
+  if (typeof value !== 'string' || !/^\d+(?:\.\d+)?$/.test(value)) return null;
+  // A portfolio value must not silently round an amount that cannot be represented safely.
+  if (value.replace(/^0+|\./g, '').replace(/^0+/, '').length > 15) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function assetIdentity(mint) {
+  return { chain: CHAIN, assetId: mint, mint, contractId: mint, isNative: mint === SOL_MINT };
 }
 
 export function priceChangePercent(actualPrice, previousPrice) {
   return ((actualPrice - previousPrice) / previousPrice) * 100;
-}
-
-export function marketCapString(supply, actualPrice) {
-  return (supply * Number(actualPrice)).toFixed();
-}
-
-export function buildAsset(token, metadata, priceHistory, stxSupply) {
-  const prices = priceHistory.prices;
-  const actualPrice = prices[0].avg_price_usd;
-  const dayPrice = prices[50].avg_price_usd;
-  const weekPrice = prices[750].avg_price_usd;
-  const monthPrice = prices[4050].avg_price_usd;
-  const isStx = token.symbol === 'STX';
-  const decimals = isStx ? 6 : metadata.decimals;
-  const supply = isStx ? stxSupply : supplyFromAtomic(metadata.total_supply, decimals);
-  const change24h = priceChangePercent(actualPrice, dayPrice);
-  const change7d = priceChangePercent(actualPrice, weekPrice);
-  const change30d = priceChangePercent(actualPrice, monthPrice);
-  const marketCap = marketCapString(supply, actualPrice);
-  return {
-    symbol: token.symbol,
-    name: isStx ? 'Stacks' : (metadata.name || token.symbol),
-    imageUrl: isStx ? 'https://cryptologos.cc/logos/stacks-stx-logo.png?v=029' : metadata.image_uri,
-    contractId: token.contract,
-    decimals,
-    price: actualPrice,
-    supply,
-    totalSupply: isStx ? stxSupply : metadata.total_supply,
-    marketCap,
-    change24h,
-    change7d,
-    change30d,
-    priceHistory: prices.map((point) => ({
-      date: point.date ?? point.timestamp ?? point.sync_at ?? point.time,
-      price: point.avg_price_usd
-    })),
-    // Legacy aliases remain while clients migrate to the normalized fields above.
-    actualprice: actualPrice,
-    image: isStx ? 'https://cryptologos.cc/logos/stacks-stx-logo.png?v=029' : metadata.image_uri,
-    marketcap: marketCap,
-    pricedayminusone: dayPrice,
-    percentdayminusone: change24h,
-    priceweekminusone: weekPrice,
-    percentweekminusone: change7d,
-    pricemonthminusone: monthPrice,
-    percentmonthminusone: change30d,
-    contractname: isStx ? 'stx' : metadata.contract_principal.split('.')[1]
-  };
 }

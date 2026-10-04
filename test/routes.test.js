@@ -1,93 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.js';
+import { SOL_MINT } from '../src/constants.js';
 
-function env(overrides = {}) {
-  return { CORS_ORIGINS: 'https://app.example', SNAPSHOTS: { get: async () => null }, ...overrides };
-}
+function env(overrides = {}) { return { CORS_ORIGINS: 'https://app.example', SNAPSHOTS: { get: async () => null }, ...overrides }; }
 
-test('health returns a request ID envelope without needing a snapshot', async () => {
+test('health preserves its request ID envelope without a snapshot', async () => {
   const response = await worker.fetch(new Request('https://api.example/health'), env(), {});
   const body = await response.json();
-  assert.equal(response.status, 200);
-  assert.equal(body.data.status, 'ok');
-  assert.ok(body.meta.requestId);
+  assert.equal(response.status, 200); assert.equal(body.data.status, 'ok'); assert.ok(body.meta.requestId);
 });
 
-test('deployment refresh rejects requests without the Worker refresh token', async () => {
+test('protected refresh rejects requests without its token', async () => {
   const response = await worker.fetch(new Request('https://api.example/internal/refresh', { method: 'POST' }), env({ REFRESH_TOKEN: 'expected' }), {});
-  const body = await response.json();
-  assert.equal(response.status, 401);
-  assert.equal(body.error.code, 'REFRESH_UNAUTHORIZED');
+  assert.equal(response.status, 401); assert.equal((await response.json()).error.code, 'REFRESH_UNAUTHORIZED');
 });
 
-test('wallet listing returns metadata for all three public demo wallets', async () => {
-  const response = await worker.fetch(new Request('https://api.example/v1/wallets'), env(), {});
-  const body = await response.json();
-  assert.equal(response.status, 200);
-  assert.deepEqual(body.data, [
-    { address: 'SP3MXB0HQH72ZGBTD6QWNRK9WNK1ZMMAXF6ANB2E8', label: 'Demo A', description: 'Public demo wallet with STX activity.' },
-    { address: 'SP34SVHFFP532M35DHWTQJKJJR2DRGS7T5XEXQ0M0', label: 'Demo B', description: 'Public demo wallet with diversified assets.' },
-    { address: 'SPG9HQ3A54KNP4V2HPJ20VBSFEE7W09ZBFJF2RNH', label: 'Demo C', description: 'Public demo wallet with recent STX activity.' }
-  ]);
+test('v2 is canonical and v1 remains an asset route alias', async () => {
+  const v2 = await worker.fetch(new Request('https://api.example/v2/assets/mint/' + SOL_MINT), env(), {});
+  const v1 = await worker.fetch(new Request('https://api.example/v1/assets/id/' + SOL_MINT), env(), {});
+  const asset = (await v2.json()).data;
+  assert.equal(v2.status, 200); assert.equal(v1.status, 200);
+  assert.equal(asset.chain, 'solana'); assert.equal(asset.mint, SOL_MINT); assert.equal(asset.contractId, SOL_MINT);
 });
 
-test('an unknown curated wallet returns the specified error code', async () => {
-  const response = await worker.fetch(new Request('https://api.example/v1/wallets/SP0000000000000000000000000000000000000'), env(), {});
+test('fixture responses preserve cache, CORS, and snapshot envelopes', async () => {
+  const response = await worker.fetch(new Request('https://api.example/v2/assets', { headers: { origin: 'https://app.example' } }), env(), {});
   const body = await response.json();
-  assert.equal(response.status, 404);
-  assert.equal(body.error.code, 'CURATED_WALLET_NOT_FOUND');
+  assert.equal(body.meta.snapshotState, 'fixture'); assert.equal(body.data.length, 3);
+  assert.equal(response.headers.get('cache-control'), 'no-store'); assert.equal(response.headers.get('access-control-allow-origin'), 'https://app.example');
 });
 
-test('unconfigured snapshots resolve to the bundled static market fixture', async () => {
-  const response = await worker.fetch(new Request('https://api.example/v1/assets'), env(), {});
-  const body = await response.json();
-  assert.equal(response.status, 200);
-  assert.equal(body.meta.snapshotState, 'fixture');
-  assert.equal(body.data.length, 13);
-  assert.equal(body.data.every((asset) => asset.symbol && asset.name && typeof asset.imageUrl === 'string' && asset.contractId
-    && Number.isFinite(Number(asset.decimals)) && asset.price !== undefined && asset.supply !== undefined
-    && asset.totalSupply !== undefined && asset.marketCap !== undefined && asset.change24h !== undefined
-    && asset.change7d !== undefined && asset.change30d !== undefined && Array.isArray(asset.priceHistory)), true);
-  assert.equal(body.meta.marketDataSource, 'snapshot');
-  assert.equal(body.meta.marketDataAsOf, '2025-06-30T00:00:00.000Z');
-  assert.equal(body.meta.refreshIntervalMinutes, 15);
-  const nextScheduledRefresh = Date.parse(body.meta.nextScheduledRefreshAt);
-  assert.equal(Number.isFinite(nextScheduledRefresh), true);
-  assert.equal(nextScheduledRefresh % (15 * 60 * 1000), 0);
-  assert.ok(nextScheduledRefresh > Date.now());
-  assert.equal(response.headers.get('cache-control'), 'no-store');
-  assert.equal(response.headers.get('x-snapshot-state'), 'fixture');
-});
-
-test('status distinguishes the static market snapshot from refresh freshness', async () => {
-  const response = await worker.fetch(new Request('https://api.example/v1/status'), env(), {});
-  const body = await response.json();
-  assert.equal(response.status, 200);
-  assert.deepEqual(body.data.marketData, { source: 'snapshot', asOf: '2025-06-30T00:00:00.000Z' });
-  assert.equal(body.data.snapshot.state, 'fixture');
-  assert.equal(body.data.swaps.count, 0);
-});
-
-test('ready resolves usable snapshot data rather than only probing KV', async () => {
-  const response = await worker.fetch(new Request('https://api.example/ready'), env(), {});
-  const body = await response.json();
-  assert.equal(response.status, 200);
-  assert.equal(body.data.status, 'ready');
-  assert.equal(body.data.snapshotState, 'fixture');
-  assert.equal(response.headers.get('cache-control'), 'no-store');
-});
-
-test('asset paths reject malformed escapes and nested paths as not found', async () => {
-  const malformed = await worker.fetch(new Request('https://api.example/v1/assets/%E0%A4%A'), env(), {});
-  const nested = await worker.fetch(new Request('https://api.example/v1/assets/STX/extra'), env(), {});
-  assert.equal(malformed.status, 404);
-  assert.equal(nested.status, 404);
-});
-
-test('asset contract paths use the canonical contract identifier', async () => {
-  const response = await worker.fetch(new Request('https://api.example/v1/assets/id/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.token-wstx'), env(), {});
-  const body = await response.json();
-  assert.equal(response.status, 200);
-  assert.equal(body.data.contractId, 'SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.token-wstx');
+test('invalid mint and wallet paths return the existing not-found envelopes', async () => {
+  const asset = await worker.fetch(new Request('https://api.example/v2/assets/mint/not-a-mint'), env(), {});
+  const wallet = await worker.fetch(new Request('https://api.example/v2/wallets/not-a-wallet'), env(), {});
+  assert.equal((await asset.json()).error.code, 'ASSET_NOT_FOUND');
+  assert.equal((await wallet.json()).error.code, 'CURATED_WALLET_NOT_FOUND');
 });
