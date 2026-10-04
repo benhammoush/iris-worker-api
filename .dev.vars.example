@@ -4,5 +4,3 @@ CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 HELIUS_API_KEY=
 # Optional locally. Jupiter enables token metadata and price refreshes.
 JUPITER_API_KEY=
-# JSON array of public wallets, for example: [{"address":"...","label":"Treasury","description":"Public wallet"}]
-TRACKED_WALLETS=[]

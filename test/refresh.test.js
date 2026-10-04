@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { refreshSnapshot } from '../src/snapshot.js';
+import { loadWalletData, refreshSnapshot } from '../src/snapshot.js';
 import { SOL_MINT } from '../src/constants.js';
 
 const wallet = { address: '11111111111111111111111111111111', label: 'Demo', description: 'Test wallet' };
 const usdc = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
-test('refresh uses Helius RPC and decoded enhanced activity without numeric raw balances', async () => {
+test('arbitrary public wallet lookup uses Helius without numeric raw balances', async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];
   globalThis.fetch = async (url, options = {}) => {
@@ -22,25 +22,19 @@ test('refresh uses Helius RPC and decoded enhanced activity without numeric raw 
     return { ok: true, json: async () => ({ [SOL_MINT]: { usdPrice: 150 }, [usdc]: { usdPrice: 1 } }) };
   };
   try {
-    const writes = new Map();
-    const snapshot = await refreshSnapshot({ SNAPSHOTS: { put: async (key, value) => writes.set(key, value) } }, { wallets: [wallet], heliusApiKey: 'helius-key', jupiterApiKey: 'jupiter-key' }, new Date('2026-10-02T12:00:00.000Z'));
-    const data = snapshot.wallets[wallet.address];
-    assert.equal(snapshot.source, 'helius-jupiter');
-    assert.equal(snapshot.swaps.length, 1);
-    assert.equal(snapshot.swaps[0].protocol, 'Raydium AMM');
-    assert.equal(snapshot.market.swaps.scope, 'registered-liquid-pools');
+    const data = await loadWalletData({}, { heliusApiKey: 'helius-key', jupiterApiKey: 'jupiter-key' }, wallet.address);
+    assert.equal(data.address, wallet.address);
     assert.equal(data.assets[0].rawBalance, '9007199254740993000');
     assert.equal(typeof data.assets[0].rawBalance, 'string');
     assert.equal(data.assets[1].balance, '2.5');
     assert.equal(data.transactions[0].chain, 'solana');
     assert.equal(requests.some((url) => url.includes('hiro')), false);
-    assert.equal(writes.size, 2);
   } finally { globalThis.fetch = originalFetch; }
 });
 
 test('refresh writes the Solana fixture when Helius is not configured', async () => {
   const writes = new Map();
-  const snapshot = await refreshSnapshot({ SNAPSHOTS: { put: async (key, value) => writes.set(key, value) } }, { wallets: [wallet] }, new Date('2026-10-02T12:00:00.000Z'));
+  const snapshot = await refreshSnapshot({ SNAPSHOTS: { put: async (key, value) => writes.set(key, value) } }, {}, new Date('2026-10-02T12:00:00.000Z'));
   assert.equal(snapshot.source, 'fixture');
   assert.equal(snapshot.assets[0].mint, SOL_MINT);
   assert.equal(writes.size, 2);

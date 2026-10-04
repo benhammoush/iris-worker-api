@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 3.0.0
+  version: 3.1.0
 paths:
   /internal/refresh:
     post:
@@ -57,9 +57,9 @@ paths:
           '200': { description: Recent decoded swaps from the reviewed registered Solana pools only. This is not a chain-wide feed. }
   /v2/wallets:
     get:
-      description: Returns metadata for configured public Solana wallets.
+      description: Returns no curated addresses. Use the address route for any valid public Solana address.
       responses:
-          '200': { description: Metadata for configured public wallets }
+          '200': { description: Empty list; Iris does not track wallet addresses. }
   /v2/wallets/{address}:
     get:
       parameters:
@@ -68,8 +68,9 @@ paths:
           required: true
           schema: { type: string }
       responses:
-          '200': { description: Cached SOL/SPL/Token-2022 public balances, totalValue, and decoded activity. Atomic amounts remain strings. }
-        '404': { description: CURATED_WALLET_NOT_FOUND }
+          '200': { description: Live SOL/SPL/Token-2022 public balances, totalValue, and decoded activity. Atomic amounts remain strings. }
+          '400': { description: INVALID_WALLET_ADDRESS }
+          '503': { description: WALLET_LOOKUP_UNAVAILABLE }
 components:
   securitySchemes:
     refreshToken:

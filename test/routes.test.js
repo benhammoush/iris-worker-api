@@ -35,5 +35,11 @@ test('invalid mint and wallet paths return the existing not-found envelopes', as
   const asset = await worker.fetch(new Request('https://api.example/v2/assets/mint/not-a-mint'), env(), {});
   const wallet = await worker.fetch(new Request('https://api.example/v2/wallets/not-a-wallet'), env(), {});
   assert.equal((await asset.json()).error.code, 'ASSET_NOT_FOUND');
-  assert.equal((await wallet.json()).error.code, 'CURATED_WALLET_NOT_FOUND');
+  assert.equal((await wallet.json()).error.code, 'INVALID_WALLET_ADDRESS');
+});
+
+test('valid public wallets are not restricted to a configured list', async () => {
+  const response = await worker.fetch(new Request(`https://api.example/v2/wallets/${SOL_MINT}`), env(), {});
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, 'WALLET_LOOKUP_UNAVAILABLE');
 });

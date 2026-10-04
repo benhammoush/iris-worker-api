@@ -124,6 +124,21 @@ function buildWalletData(wallet, source, assets) {
   return { label: wallet.label, description: wallet.description, chain: 'solana', assets: walletAssets, totalValue, portfolioTotal: totalValue, activity: transactions, transactions, swaps };
 }
 
+export async function loadWalletData(env, config, address) {
+  const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
+  if (!apiKey) {
+    const cause = new Error('Helius is not configured.');
+    cause.code = 'WALLET_LOOKUP_UNAVAILABLE';
+    throw cause;
+  }
+  const source = await fetchWalletSource({ address }, apiKey);
+  const mints = [...new Set([SOL_MINT, ...source.tokenBalances.map((balance) => balance.mint)])].slice(0, MAX_DISCOVERED_ASSETS);
+  const market = await refreshMarket(config.jupiterApiKey || env.JUPITER_API_KEY, mints);
+  const marketAssetsByMint = new Map((market?.assets || []).map((asset) => [asset.mint, asset]));
+  const assets = mints.map((mint) => marketAssetsByMint.get(mint) || fallbackAsset(mint));
+  return { address, ...buildWalletData({ address, label: address, description: '' }, source, assets) };
+}
+
 export async function refreshSnapshot(env, config, now = new Date()) {
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
   if (!apiKey) {
@@ -132,17 +147,15 @@ export async function refreshSnapshot(env, config, now = new Date()) {
     await env.SNAPSHOTS.put(SNAPSHOT_POINTER_KEY, JSON.stringify({ key: `${SNAPSHOT_KEY_PREFIX}${now.getTime()}`, createdAt: snapshot.createdAt }));
     return snapshot;
   }
-  const [results, trackedPoolResult, slotResult] = await Promise.all([
-    Promise.allSettled(config.wallets.map(async (wallet) => [wallet.address, await fetchWalletSource(wallet, apiKey)])),
+  const [trackedPoolResult, slotResult] = await Promise.all([
     fetchTrackedPoolSwaps(apiKey).catch((cause) => { console.warn('Tracked pool swaps unavailable', { message: cause.message }); return []; }),
     heliusRpc('getSlot', [{ commitment: 'finalized' }], apiKey).catch(() => null)
   ]);
-  const sources = Object.fromEntries(results.filter((result) => result.status === 'fulfilled').map((result) => result.value));
-  const mints = [...new Set([SOL_MINT, ...Object.values(sources).flatMap((source) => source.tokenBalances.map((balance) => balance.mint))])].slice(0, MAX_DISCOVERED_ASSETS);
+  const mints = [SOL_MINT];
   const market = await refreshMarket(config.jupiterApiKey || env.JUPITER_API_KEY, mints);
   const marketAssetsByMint = new Map((market?.assets || []).map((asset) => [asset.mint, asset]));
   const assets = mints.map((mint) => marketAssetsByMint.get(mint) || fallbackAsset(mint));
-  const wallets = Object.fromEntries(config.wallets.map((wallet) => [wallet.address, buildWalletData(wallet, sources[wallet.address], assets)]));
+  const wallets = {};
   const swaps = trackedPoolResult.sort((left, right) => String(right.timestamp ?? '').localeCompare(String(left.timestamp ?? ''))).slice(0, MAX_SWAPS);
   const snapshot = { version: 2, createdAt: now.toISOString(), source: market ? 'helius-jupiter' : 'helius', market: { fees: null, slot: slotResult, block_height: slotResult, source: market?.source || 'fixture', asOf: market?.asOf || MARKET_SNAPSHOT.asOf, historySource: market?.historySource || null, liveAssetCount: market?.liveAssetCount || 0, swaps: { count: swaps.length, asOf: new Date().toISOString(), source: 'helius-decoded-tracked-pools', scope: 'registered-liquid-pools', error: null }, history: assets.map((asset) => ({ mint: asset.mint, symbol: asset.symbol, points: asset.priceHistory })) }, assets, wallets, swaps };
   const key = `${SNAPSHOT_KEY_PREFIX}${now.getTime()}`;

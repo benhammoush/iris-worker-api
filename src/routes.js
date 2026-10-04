@@ -1,6 +1,6 @@
 import { API_VERSION, REFRESH_INTERVAL_MINUTES, REFRESH_INTERVAL_MS } from './constants.js';
 import { error, json } from './http.js';
-import { isUsableSnapshot, resolveSnapshot } from './snapshot.js';
+import { isUsableSnapshot, loadWalletData, resolveSnapshot } from './snapshot.js';
 import { isBase58PublicKey } from './transforms.js';
 
 export async function route(request, env, config, id, origin) {
@@ -53,15 +53,20 @@ export async function route(request, env, config, id, origin) {
   }
   if (url.pathname === `${versionPrefix}/swaps`) return json({ data: snapshot.swaps, meta }, 200, id, origin, snapshotHeaders);
   if (url.pathname === `${versionPrefix}/wallets`) {
-    return json({ data: config.wallets.map((wallet) => ({ chain: 'solana', ...wallet })), meta }, 200, id, origin, snapshotHeaders);
+    return json({ data: [], meta }, 200, id, origin, snapshotHeaders);
   }
   if (url.pathname.startsWith(`${versionPrefix}/wallets/`)) {
     let address;
-    try { address = decodeURIComponent(url.pathname.slice(`${versionPrefix}/wallets/`.length)); } catch { return error('CURATED_WALLET_NOT_FOUND', 'Wallet is not in the curated configuration.', 404, id, origin); }
-    if (!isBase58PublicKey(address)) return error('CURATED_WALLET_NOT_FOUND', 'Wallet is not in the curated configuration.', 404, id, origin);
-    const wallet = config.wallets.find((item) => item.address === address);
-    if (!wallet) return error('CURATED_WALLET_NOT_FOUND', 'Wallet is not in the curated configuration.', 404, id, origin);
-    return json({ data: { chain: 'solana', address, ...wallet, ...(snapshot.wallets[address] || { assets: [], portfolioTotal: 0, transactions: [], swaps: [] }) }, meta }, 200, id, origin, snapshotHeaders);
+    try { address = decodeURIComponent(url.pathname.slice(`${versionPrefix}/wallets/`.length)); } catch { return error('INVALID_WALLET_ADDRESS', 'Wallet address is invalid.', 400, id, origin); }
+    if (!isBase58PublicKey(address)) return error('INVALID_WALLET_ADDRESS', 'Wallet address is invalid.', 400, id, origin);
+    try {
+      const wallet = await loadWalletData(env, config, address);
+      return json({ data: wallet, meta: { ...meta, walletDataSource: 'helius-live' } }, 200, id, origin, snapshotHeaders);
+    } catch (cause) {
+      if (cause.code === 'WALLET_LOOKUP_UNAVAILABLE') return error(cause.code, 'Public wallet lookup is unavailable until Helius is configured.', 503, id, origin);
+      console.warn('wallet lookup unavailable', { address, message: cause.message });
+      return error('WALLET_LOOKUP_UNAVAILABLE', 'Public wallet data is currently unavailable.', 503, id, origin);
+    }
   }
   return error('NOT_FOUND', 'Route was not found.', 404, id, origin);
 }
