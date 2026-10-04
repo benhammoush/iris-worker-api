@@ -44,7 +44,14 @@ export async function refreshMarket(apiKey) {
   if (!apiKey) return null;
   const headers = { 'x-cg-demo-api-key': apiKey };
   const charts = [];
-  for (const asset of LIVE_ASSETS) charts.push(await fetchJson(`${COINGECKO}/coins/${asset.coinId}/market_chart?vs_currency=usd&days=365`, { headers }));
+  for (const asset of LIVE_ASSETS) {
+    try {
+      charts.push(await fetchJson(`${COINGECKO}/coins/${asset.coinId}/market_chart?vs_currency=usd&days=365`, { headers }));
+    } catch (cause) {
+      console.warn('CoinGecko chart refresh unavailable', { symbol: asset.symbol, message: cause.message });
+      charts.push(null);
+    }
+  }
   let dexPairs = [];
   let dexAvailable = true;
   try {
@@ -57,7 +64,7 @@ export async function refreshMarket(apiKey) {
 
   LIVE_ASSETS.forEach((definition, index) => {
     const asset = assets.find((item) => item.symbol === definition.symbol);
-    const history = historyFrom(charts[index]);
+    const history = charts[index] ? historyFrom(charts[index]) : [];
     const latest = history.at(-1);
     if (!asset || !latest) return;
     const pair = bestDexPair(dexPairs, definition.dexAddress);
@@ -96,7 +103,7 @@ export async function refreshMarket(apiKey) {
     assets,
     source: dexAvailable ? 'mixed' : 'coingecko',
     asOf: new Date().toISOString(),
-    liveAssetCount: LIVE_ASSETS.length,
+    liveAssetCount: assets.filter((asset) => asset.marketDataSource).length,
     historySource: 'coingecko'
   };
 }
