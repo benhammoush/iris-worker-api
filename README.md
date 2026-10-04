@@ -12,6 +12,10 @@ Cloudflare Worker API for cached Stacks market data and three public demonstrati
 
 Wallets are fixed public third-party addresses. No wallet API credentials or wallet environment variables are required.
 
+## Deployment
+
+Pushes to `main` automatically deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret. Create a least-privilege Cloudflare token that can deploy Workers for the account hosting `iris-api`; its value is never stored in this repository. Until the secret is configured, the deploy job is skipped while validation continues.
+
 | Label | Address | Description |
 | --- | --- | --- |
 | Demo A | `SP3MXB0HQH72ZGBTD6QWNRK9WNK1ZMMAXF6ANB2E8` | STX activity |
