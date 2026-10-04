@@ -7,7 +7,11 @@ const HIRO = 'https://api.mainnet.hiro.so';
 
 async function fetchJson(url) {
   const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-  if (!response.ok) throw new Error(`Upstream request failed with ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`Upstream request failed with ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 
@@ -190,7 +194,8 @@ async function fetchGlobalSwaps() {
     };
   } catch (cause) {
     console.warn('Global swap refresh unavailable', { message: cause.message });
-    return { swaps: [], error: 'UPSTREAM_UNAVAILABLE', asOf: null };
+    const error = cause.name === 'TimeoutError' ? 'UPSTREAM_TIMEOUT' : cause.status === 429 ? 'UPSTREAM_RATE_LIMITED' : cause.status ? `UPSTREAM_HTTP_${cause.status}` : 'UPSTREAM_UNAVAILABLE';
+    return { swaps: [], error, asOf: null };
   }
 }
 
