@@ -1,5 +1,6 @@
 import { FIXTURE_SNAPSHOT, MARKET_SNAPSHOT } from './fixtures.js';
 import { FRESH_AFTER_MS, MAX_SWAPS, MAX_TRANSACTIONS_PER_WALLET, SNAPSHOT_KEY_PREFIX, SNAPSHOT_POINTER_KEY, STALE_AFTER_MS } from './constants.js';
+import { refreshMarket } from './market.js';
 
 const HIRO = 'https://api.mainnet.hiro.so';
 
@@ -12,7 +13,7 @@ async function fetchJson(url) {
 export function isUsableSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object' || !Number.isFinite(Date.parse(snapshot.createdAt))) return false;
   return snapshot.market && typeof snapshot.market === 'object'
-    && snapshot.market.source === 'snapshot' && Number.isFinite(Date.parse(snapshot.market.asOf))
+    && typeof snapshot.market.source === 'string' && Number.isFinite(Date.parse(snapshot.market.asOf))
     && Array.isArray(snapshot.assets)
     && snapshot.assets.every((asset) => asset && typeof asset === 'object' && typeof asset.symbol === 'string'
       && typeof asset.name === 'string' && typeof asset.imageUrl === 'string' && typeof asset.contractId === 'string'
@@ -128,12 +129,13 @@ async function fetchWalletData(wallet, assets) {
 }
 
 export async function refreshSnapshot(env, config, now = new Date()) {
-  const [fees, info, stxSupply] = await Promise.all([
+  const [fees, info, stxSupply, refreshedMarket] = await Promise.all([
     fetchJson(`${HIRO}/extended/v2/mempool/fees`),
     fetchJson(`${HIRO}/v2/info`),
-    fetchJson(`${HIRO}/extended/v1/stx_supply`)
+    fetchJson(`${HIRO}/extended/v1/stx_supply`),
+    refreshMarket(env.COINGECKO_DEMO_API_KEY)
   ]);
-  const assets = MARKET_SNAPSHOT.assets;
+  const assets = refreshedMarket?.assets || MARKET_SNAPSHOT.assets;
   const walletEntries = await Promise.all(config.wallets.map(async (wallet) => [wallet.address, await fetchWalletData(wallet, assets)]));
   const wallets = Object.fromEntries(walletEntries);
   const swaps = walletEntries
@@ -149,8 +151,10 @@ export async function refreshSnapshot(env, config, now = new Date()) {
       stacksTipHeight: info.stacks_tip_height,
       block_height: info.stacks_tip_height,
       stxSupply: stxSupply.unlocked_stx,
-      source: MARKET_SNAPSHOT.source,
-      asOf: MARKET_SNAPSHOT.asOf,
+      source: refreshedMarket?.source || MARKET_SNAPSHOT.source,
+      asOf: refreshedMarket?.asOf || MARKET_SNAPSHOT.asOf,
+      historySource: refreshedMarket?.historySource || 'snapshot',
+      liveAssetCount: refreshedMarket?.liveAssetCount || 0,
       history: assets.map((asset) => ({ symbol: asset.symbol, points: asset.priceHistory }))
     },
     assets,

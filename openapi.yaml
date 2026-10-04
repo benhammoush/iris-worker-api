@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 2.0.3
+  version: 2.1.0
 paths:
   /health:
     get:
@@ -19,11 +19,11 @@ paths:
   /v1/market:
     get:
       responses:
-        '200': { description: Live Hiro fees, latest Stacks tip and supply, plus static market snapshot source/asOf }
+        '200': { description: Live Hiro fees, latest Stacks tip and supply, plus CoinGecko/DexScreener market data when configured or snapshot fallback }
   /v1/assets:
     get:
       responses:
-        '200': { description: Curated market assets from the bundled static snapshot; response metadata includes source and fixed asOf }
+        '200': { description: Curated market assets with provider provenance; unsupported assets use the bundled snapshot fallback }
   /v1/assets/{symbol}:
     get:
       parameters:
