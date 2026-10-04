@@ -7,14 +7,14 @@ Cloudflare Worker API for cached Stacks market data and three public demonstrati
 1. Run `npm install`.
 2. Copy `.dev.vars.example` to `.dev.vars` and set only local values. Do not commit `.dev.vars`.
 3. Create the KV namespaces and replace the placeholder namespace IDs in `wrangler.toml` before deploying.
-4. Set `COINGECKO_DEMO_API_KEY` in `.dev.vars` for local live-market refreshes. Set it as a Worker secret for staging and production; never commit it.
+4. Set `COINGECKO_DEMO_API_KEY` in `.dev.vars` for local live-market refreshes. Set it as a Worker secret for staging and production; never commit it. Set optional `HIRO_API_KEY` to use Hiro's authenticated rate limit for catalog, wallet, and swap refreshes.
 4. Run `npm run dev` or `npm test`.
 
 Wallets are fixed public third-party addresses. No wallet API credentials or wallet environment variables are required.
 
 ## Deployment
 
-Pushes to `main` automatically deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret. Create a least-privilege Cloudflare token that can deploy Workers for the account hosting `iris-api`; its value is never stored in this repository. Set the same high-entropy `IRIS_REFRESH_TOKEN` GitHub secret as the Worker `REFRESH_TOKEN` secret to invoke the protected `/internal/refresh` endpoint immediately after deployment. The refresh publishes available sections and reports unavailable providers instead of failing when an optional upstream source is unavailable. Until the required secrets are configured, deployment or immediate refresh is skipped while validation continues.
+Pushes to `main` automatically deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret. Create a least-privilege Cloudflare token that can deploy Workers for the account hosting `iris-api`; its value is never stored in this repository. Set `HIRO_API_KEY` as a Worker secret to avoid public Hiro rate limits. Set the same high-entropy `IRIS_REFRESH_TOKEN` GitHub secret as the Worker `REFRESH_TOKEN` secret to invoke the protected `/internal/refresh` endpoint immediately after deployment. The refresh publishes available sections and reports unavailable providers instead of failing when an optional upstream source is unavailable. Until the required secrets are configured, deployment or immediate refresh is skipped while validation continues.
 
 | Label | Address | Description |
 | --- | --- | --- |

@@ -5,8 +5,8 @@ import { isRegisteredDexSwap, protocolForSwap, registeredDexRoutes } from './dex
 
 const HIRO = 'https://api.mainnet.hiro.so';
 
-async function fetchJson(url) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+async function fetchJson(url, hiroApiKey) {
+  const response = await fetch(url, { headers: hiroApiKey ? { 'x-api-key': hiroApiKey } : undefined, signal: AbortSignal.timeout(10_000) });
   if (!response.ok) {
     const error = new Error(`Upstream request failed with ${response.status}`);
     error.status = response.status;
@@ -100,14 +100,14 @@ function safeImageUrl(value) {
   try { return new URL(value).protocol === 'https:' ? value : ''; } catch { return ''; }
 }
 
-async function discoverAssets(balancePayloads, knownAssets) {
+async function discoverAssets(balancePayloads, knownAssets, hiroApiKey) {
   const knownContractIds = new Set(knownAssets.map((asset) => asset.contractId));
   const contractIds = [...new Set(balancePayloads.flatMap((balances) => Object.keys(balances.fungible_tokens || {}).map(assetContractId)))]
     .filter((contractId) => !knownContractIds.has(contractId))
     .slice(0, MAX_DISCOVERED_ASSETS);
   const discovered = await Promise.all(contractIds.map(async (contractId) => {
     try {
-      const metadata = await fetchJson(`${HIRO}/metadata/v1/ft/${encodeURIComponent(contractId)}`);
+      const metadata = await fetchJson(`${HIRO}/metadata/v1/ft/${encodeURIComponent(contractId)}`, hiroApiKey);
       const decimals = Number(metadata.decimals);
       if (!Number.isInteger(decimals) || decimals < 0) return null;
       const symbol = metadata.symbol || contractId.split('.')[1];
@@ -162,9 +162,9 @@ function assetFromMetadata(metadata) {
   };
 }
 
-async function fetchTradableCandidates() {
+async function fetchTradableCandidates(hiroApiKey) {
   try {
-    const payload = await fetchJson(`${HIRO}/metadata/v1/ft?valid_metadata_only=true&limit=${MAX_CATALOG_ASSETS}&offset=0`);
+    const payload = await fetchJson(`${HIRO}/metadata/v1/ft?valid_metadata_only=true&limit=${MAX_CATALOG_ASSETS}&offset=0`, hiroApiKey);
     return (payload.results || []).map(assetFromMetadata).filter(Boolean);
   } catch (cause) {
     console.warn('Token catalog refresh unavailable', { message: cause.message });
@@ -172,10 +172,10 @@ async function fetchTradableCandidates() {
   }
 }
 
-async function fetchCuratedMetadata() {
+async function fetchCuratedMetadata(hiroApiKey) {
   const metadata = await Promise.all(MARKET_SNAPSHOT.assets.filter((asset) => asset.symbol !== 'STX').map(async (asset) => {
     try {
-      return assetFromMetadata(await fetchJson(`${HIRO}/metadata/v1/ft/${encodeURIComponent(asset.contractId)}`));
+      return assetFromMetadata(await fetchJson(`${HIRO}/metadata/v1/ft/${encodeURIComponent(asset.contractId)}`, hiroApiKey));
     } catch (cause) {
       console.warn('Curated token metadata unavailable', { contractId: asset.contractId, message: cause.message });
       return null;
@@ -184,12 +184,12 @@ async function fetchCuratedMetadata() {
   return metadata.filter(Boolean);
 }
 
-async function fetchGlobalSwaps() {
+async function fetchGlobalSwaps(hiroApiKey) {
   const swaps = [];
   try {
     for (const route of registeredDexRoutes()) {
       for (let page = 0; page < GLOBAL_TRANSACTION_SCAN_PAGES; page += 1) {
-        const payload = await fetchJson(`${HIRO}/extended/v1/address/${route.contractId}/transactions?limit=${MAX_GLOBAL_TRANSACTION_SCAN}&offset=${page * MAX_GLOBAL_TRANSACTION_SCAN}`);
+        const payload = await fetchJson(`${HIRO}/extended/v1/address/${route.contractId}/transactions?limit=${MAX_GLOBAL_TRANSACTION_SCAN}&offset=${page * MAX_GLOBAL_TRANSACTION_SCAN}`, hiroApiKey);
         swaps.push(...(payload.results || []).filter(isRegisteredDexSwap).map((transaction) => normalizeSwap(null, transaction)));
       }
     }
@@ -232,11 +232,11 @@ function buildWalletAssets(balances, assets) {
   });
 }
 
-async function fetchWalletSource(wallet) {
+async function fetchWalletSource(wallet, hiroApiKey) {
   const address = wallet.address;
   const [balances, transactionPayload] = await Promise.all([
-    fetchJson(`${HIRO}/extended/v1/address/${address}/balances`),
-    fetchJson(`${HIRO}/extended/v1/address/${address}/transactions_with_transfers?limit=${MAX_TRANSACTION_SCAN_PER_WALLET}&offset=0`)
+    fetchJson(`${HIRO}/extended/v1/address/${address}/balances`, hiroApiKey),
+    fetchJson(`${HIRO}/extended/v1/address/${address}/transactions_with_transfers?limit=${MAX_TRANSACTION_SCAN_PER_WALLET}&offset=0`, hiroApiKey)
   ]);
   return { balances, transactions: transactionPayload.results || [] };
 }
@@ -263,20 +263,21 @@ function buildWalletData(wallet, source, assets) {
 }
 
 export async function refreshSnapshot(env, config, now = new Date()) {
+  const hiroApiKey = env.HIRO_API_KEY;
   const [feesResult, infoResult, stxSupplyResult, walletResults, catalogCandidates, curatedMetadata, globalSwapResult] = await Promise.all([
-    fetchJson(`${HIRO}/extended/v2/mempool/fees`).catch((cause) => { console.warn('Fee refresh unavailable', { message: cause.message }); return null; }),
-    fetchJson(`${HIRO}/v2/info`).catch((cause) => { console.warn('Chain info refresh unavailable', { message: cause.message }); return null; }),
-    fetchJson(`${HIRO}/extended/v1/stx_supply`).catch((cause) => { console.warn('STX supply refresh unavailable', { message: cause.message }); return null; }),
-    Promise.allSettled(config.wallets.map(async (wallet) => [wallet.address, await fetchWalletSource(wallet)])),
-    fetchTradableCandidates(),
-    fetchCuratedMetadata(),
-    fetchGlobalSwaps()
+    fetchJson(`${HIRO}/extended/v2/mempool/fees`, hiroApiKey).catch((cause) => { console.warn('Fee refresh unavailable', { message: cause.message }); return null; }),
+    fetchJson(`${HIRO}/v2/info`, hiroApiKey).catch((cause) => { console.warn('Chain info refresh unavailable', { message: cause.message }); return null; }),
+    fetchJson(`${HIRO}/extended/v1/stx_supply`, hiroApiKey).catch((cause) => { console.warn('STX supply refresh unavailable', { message: cause.message }); return null; }),
+    Promise.allSettled(config.wallets.map(async (wallet) => [wallet.address, await fetchWalletSource(wallet, hiroApiKey)])),
+    fetchTradableCandidates(hiroApiKey),
+    fetchCuratedMetadata(hiroApiKey),
+    fetchGlobalSwaps(hiroApiKey)
   ]);
   const fees = feesResult;
   const info = infoResult || {};
   const stxSupply = stxSupplyResult || {};
   const walletSources = walletResults.filter((result) => result.status === 'fulfilled').map((result) => result.value);
-  const discoveredAssets = await discoverAssets(walletSources.map(([, source]) => source.balances), MARKET_SNAPSHOT.assets);
+  const discoveredAssets = await discoverAssets(walletSources.map(([, source]) => source.balances), MARKET_SNAPSHOT.assets, hiroApiKey);
   const refreshedMarket = await refreshMarket(env.COINGECKO_DEMO_API_KEY, [...catalogCandidates, ...curatedMetadata, ...discoveredAssets]);
   const marketAssets = refreshedMarket?.assets || [...MARKET_SNAPSHOT.assets, ...discoveredAssets];
   const assets = refreshedMarket ? marketAssets.filter((asset) => asset.symbol === 'STX' || asset.marketDataSource) : marketAssets;
