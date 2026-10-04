@@ -14,7 +14,7 @@ Any valid public Solana address can be looked up; Iris never requests wallet sig
 
 ## Deployment
 
-Pushes to `main` automatically deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret. Create a least-privilege Cloudflare token that can deploy Workers for the account hosting `iris-api`; its value is never stored in this repository. Set `HELIUS_API_KEY` and `JUPITER_API_KEY` as Worker secrets. Set the same high-entropy `IRIS_REFRESH_TOKEN` GitHub secret as the Worker `REFRESH_TOKEN` secret to invoke the protected `/internal/refresh` endpoint immediately after deployment. If required Jupiter catalog discovery fails, refresh preserves the last complete snapshot instead of publishing partial data.
+Pushes to `main` automatically deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret. Create a least-privilege Cloudflare token that can deploy Workers for the account hosting `iris-api`; its value is never stored in this repository. Set `HELIUS_API_KEY` and `JUPITER_API_KEY` as Worker secrets. The deploy job invokes the protected `/internal/refresh` endpoint immediately after deployment using the high-entropy `IRIS_REFRESH_TOKEN` GitHub secret, which must match the Worker `REFRESH_TOKEN` secret. If required Jupiter catalog discovery fails, refresh preserves the last complete snapshot instead of publishing partial data.
 
 ## Snapshot behavior
 
