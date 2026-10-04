@@ -24,7 +24,7 @@ The production Cron runs every 15 minutes. Refresh fetches only Hiro fees, lates
 
 With `COINGECKO_DEMO_API_KEY` configured, STX, ALEX, WELSH, LEO, and aBTC use CoinGecko historical market data and the most liquid matching Stacks DEX Screener pair for current price/liquidity. Other bundled assets remain snapshot-backed. Without the secret, all market assets use the bundled demonstration snapshot in `src/fixtures.js`. Response metadata includes `marketDataSource` and `marketDataAsOf`, while `snapshotState` describes only the freshness of the live-refresh snapshot.
 
-Responses are JSON envelopes with `meta.requestId`; errors use `error.code`. Snapshot responses include `X-Snapshot-State` and are `Cache-Control: no-store`. The resolver serves fresh data for up to 30 minutes, stale data for more than 30 minutes through 24 hours, then the bundled fixture snapshot.
+Responses are JSON envelopes with `meta.requestId`; errors use `error.code`. Snapshot responses include `snapshotCreatedAt`, `refreshIntervalMinutes`, and `nextScheduledRefreshAt` (the next UTC cron boundary), plus `X-Snapshot-State`, and are `Cache-Control: no-store`. The resolver serves fresh data for up to 30 minutes, stale data for more than 30 minutes through 24 hours, then the bundled fixture snapshot.
 
 ## Endpoints
 

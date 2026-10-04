@@ -44,6 +44,11 @@ test('unconfigured snapshots resolve to the bundled static market fixture', asyn
     && asset.change7d !== undefined && asset.change30d !== undefined && Array.isArray(asset.priceHistory)), true);
   assert.equal(body.meta.marketDataSource, 'snapshot');
   assert.equal(body.meta.marketDataAsOf, '2025-06-30T00:00:00.000Z');
+  assert.equal(body.meta.refreshIntervalMinutes, 15);
+  const nextScheduledRefresh = Date.parse(body.meta.nextScheduledRefreshAt);
+  assert.equal(Number.isFinite(nextScheduledRefresh), true);
+  assert.equal(nextScheduledRefresh % (15 * 60 * 1000), 0);
+  assert.ok(nextScheduledRefresh > Date.now());
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(response.headers.get('x-snapshot-state'), 'fixture');
 });

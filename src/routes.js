@@ -1,4 +1,4 @@
-import { API_VERSION } from './constants.js';
+import { API_VERSION, REFRESH_INTERVAL_MINUTES, REFRESH_INTERVAL_MS } from './constants.js';
 import { error, json } from './http.js';
 import { isUsableSnapshot, resolveSnapshot } from './snapshot.js';
 
@@ -21,7 +21,9 @@ export async function route(request, env, config, id, origin) {
     snapshotState: state,
     snapshotCreatedAt: snapshot.createdAt,
     marketDataSource: snapshot.market.source,
-    marketDataAsOf: snapshot.market.asOf
+    marketDataAsOf: snapshot.market.asOf,
+    refreshIntervalMinutes: REFRESH_INTERVAL_MINUTES,
+    nextScheduledRefreshAt: new Date((Math.floor(Date.now() / REFRESH_INTERVAL_MS) + 1) * REFRESH_INTERVAL_MS).toISOString()
   };
   const snapshotHeaders = { 'cache-control': 'no-store', 'x-snapshot-state': state };
   if (url.pathname === '/v1/status') return json({ data: { version: API_VERSION, snapshot: { state, createdAt: snapshot.createdAt, source: snapshot.source }, marketData: { source: snapshot.market.source, asOf: snapshot.market.asOf } }, meta }, 200, id, origin, snapshotHeaders);

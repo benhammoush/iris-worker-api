@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 2.1.6
+  version: 2.2.0
 paths:
   /health:
     get:
@@ -15,7 +15,7 @@ paths:
   /v1/status:
     get:
       responses:
-        '200': { description: API version, live-refresh snapshot freshness, and independent static market snapshot source/asOf }
+          '200': { description: API version, live-refresh snapshot freshness, next scheduled UTC cron refresh, and independent static market snapshot source/asOf }
   /v1/market:
     get:
       responses:
