@@ -261,15 +261,18 @@ function buildWalletData(wallet, source, assets) {
 }
 
 export async function refreshSnapshot(env, config, now = new Date()) {
-  const [fees, info, stxSupply, walletResults, catalogCandidates, curatedMetadata, globalSwapResult] = await Promise.all([
-    fetchJson(`${HIRO}/extended/v2/mempool/fees`),
-    fetchJson(`${HIRO}/v2/info`),
-    fetchJson(`${HIRO}/extended/v1/stx_supply`),
+  const [feesResult, infoResult, stxSupplyResult, walletResults, catalogCandidates, curatedMetadata, globalSwapResult] = await Promise.all([
+    fetchJson(`${HIRO}/extended/v2/mempool/fees`).catch((cause) => { console.warn('Fee refresh unavailable', { message: cause.message }); return null; }),
+    fetchJson(`${HIRO}/v2/info`).catch((cause) => { console.warn('Chain info refresh unavailable', { message: cause.message }); return null; }),
+    fetchJson(`${HIRO}/extended/v1/stx_supply`).catch((cause) => { console.warn('STX supply refresh unavailable', { message: cause.message }); return null; }),
     Promise.allSettled(config.wallets.map(async (wallet) => [wallet.address, await fetchWalletSource(wallet)])),
     fetchTradableCandidates(),
     fetchCuratedMetadata(),
     fetchGlobalSwaps()
   ]);
+  const fees = feesResult;
+  const info = infoResult || {};
+  const stxSupply = stxSupplyResult || {};
   const walletSources = walletResults.filter((result) => result.status === 'fulfilled').map((result) => result.value);
   const discoveredAssets = await discoverAssets(walletSources.map(([, source]) => source.balances), MARKET_SNAPSHOT.assets);
   const refreshedMarket = await refreshMarket(env.COINGECKO_DEMO_API_KEY, [...catalogCandidates, ...curatedMetadata, ...discoveredAssets]);
