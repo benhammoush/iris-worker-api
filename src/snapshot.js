@@ -1,5 +1,5 @@
 import { FIXTURE_SNAPSHOT, MARKET_SNAPSHOT } from './fixtures.js';
-import { FRESH_AFTER_MS, MAX_CATALOG_ASSETS, MAX_DISCOVERED_ASSETS, MAX_GLOBAL_TRANSACTION_SCAN, MAX_SWAPS, MAX_TRANSACTIONS_PER_WALLET, MAX_TRANSACTION_SCAN_PER_WALLET, SNAPSHOT_KEY_PREFIX, SNAPSHOT_POINTER_KEY, STALE_AFTER_MS } from './constants.js';
+import { FRESH_AFTER_MS, GLOBAL_TRANSACTION_SCAN_PAGES, MAX_CATALOG_ASSETS, MAX_DISCOVERED_ASSETS, MAX_GLOBAL_TRANSACTION_SCAN, MAX_SWAPS, MAX_TRANSACTIONS_PER_WALLET, MAX_TRANSACTION_SCAN_PER_WALLET, SNAPSHOT_KEY_PREFIX, SNAPSHOT_POINTER_KEY, STALE_AFTER_MS } from './constants.js';
 import { refreshMarket } from './market.js';
 import { isRegisteredDexSwap, protocolForSwap } from './dexRegistry.js';
 
@@ -185,13 +185,13 @@ async function fetchCuratedMetadata() {
 }
 
 async function fetchGlobalSwaps() {
+  const swaps = [];
   try {
-    const payload = await fetchJson(`${HIRO}/extended/v1/tx?limit=${MAX_GLOBAL_TRANSACTION_SCAN}&offset=0`);
-    return {
-      swaps: (payload.results || []).filter(isRegisteredDexSwap).map((transaction) => normalizeSwap(null, transaction)),
-      error: null,
-      asOf: new Date().toISOString()
-    };
+    for (let page = 0; page < GLOBAL_TRANSACTION_SCAN_PAGES; page += 1) {
+      const payload = await fetchJson(`${HIRO}/extended/v1/tx?limit=${MAX_GLOBAL_TRANSACTION_SCAN}&offset=${page * MAX_GLOBAL_TRANSACTION_SCAN}`);
+      swaps.push(...(payload.results || []).filter(isRegisteredDexSwap).map((transaction) => normalizeSwap(null, transaction)));
+    }
+    return { swaps, error: null, asOf: new Date().toISOString() };
   } catch (cause) {
     console.warn('Global swap refresh unavailable', { message: cause.message });
     const error = cause.name === 'TimeoutError' ? 'UPSTREAM_TIMEOUT' : cause.status === 429 ? 'UPSTREAM_RATE_LIMITED' : cause.status ? `UPSTREAM_HTTP_${cause.status}` : 'UPSTREAM_UNAVAILABLE';

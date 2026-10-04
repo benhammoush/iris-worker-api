@@ -67,7 +67,7 @@ test('refresh normalizes balances and transactions from the public Hiro endpoint
     assert.equal(demoA.totalValue, demoA.portfolioTotal);
     assert.ok(requests.every((url) => url.startsWith('https://api.mainnet.hiro.so/')));
     assert.equal(requests.filter((url) => url.includes('/transactions_with_transfers?limit=100&offset=0')).length, 3);
-    assert.equal(requests.filter((url) => url.includes('/extended/v1/tx?limit=20&offset=0')).length, 1);
+    assert.equal(requests.filter((url) => url.includes('/extended/v1/tx?limit=20&offset=')).length, 3);
     assert.equal(requests.some((url) => url.includes('/metadata/')), true);
     assert.equal(requests.some((url) => url.includes('alexgo.io')), false);
     assert.equal(snapshot.market.history.length, snapshot.assets.length);
