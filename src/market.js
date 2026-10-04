@@ -42,9 +42,7 @@ function nearestPrice(history, target) {
 
 export async function refreshMarket(apiKey) {
   if (!apiKey) return null;
-  const ids = LIVE_ASSETS.map((asset) => asset.coinId);
   const headers = { 'x-cg-demo-api-key': apiKey };
-  const prices = await fetchJson(`${COINGECKO}/simple/price?ids=${ids.join(',')}&vs_currencies=usd&include_market_cap=true&include_24hr_vol=true&include_24hr_change=true&include_last_updated_at=true`, { headers });
   const charts = [];
   for (const asset of LIVE_ASSETS) charts.push(await fetchJson(`${COINGECKO}/coins/${asset.coinId}/market_chart?vs_currency=usd&days=365`, { headers }));
   const dexPairs = await fetchJson(`${DEX_SCREENER}/tokens/v1/stacks/${LIVE_ASSETS.map((asset) => asset.dexAddress).join(',')}`);
@@ -52,11 +50,11 @@ export async function refreshMarket(apiKey) {
 
   LIVE_ASSETS.forEach((definition, index) => {
     const asset = assets.find((item) => item.symbol === definition.symbol);
-    const quote = prices[definition.coinId];
-    if (!asset || !quote) return;
-    const pair = bestDexPair(dexPairs, definition.dexAddress);
     const history = historyFrom(charts[index]);
-    const price = Number(pair?.priceUsd ?? quote.usd);
+    const latest = history.at(-1);
+    if (!asset || !latest) return;
+    const pair = bestDexPair(dexPairs, definition.dexAddress);
+    const price = Number(pair?.priceUsd ?? latest.price);
     if (!Number.isFinite(price)) return;
     const now = Date.now();
     const dayPrice = nearestPrice(history, now - 24 * 60 * 60 * 1000);
@@ -64,7 +62,7 @@ export async function refreshMarket(apiKey) {
     const monthPrice = nearestPrice(history, now - 30 * 24 * 60 * 60 * 1000);
     asset.price = price;
     asset.actualprice = price;
-    asset.marketCap = String(quote.usd_market_cap ?? asset.marketCap);
+    asset.marketCap = String(latest.marketCap ?? asset.marketCap);
     asset.marketcap = asset.marketCap;
     asset.change24h = Number.isFinite(Number(dayPrice)) ? priceChangePercent(price, dayPrice) : asset.change24h;
     asset.change7d = Number.isFinite(Number(weekPrice)) ? priceChangePercent(price, weekPrice) : asset.change7d;
@@ -75,7 +73,7 @@ export async function refreshMarket(apiKey) {
     asset.priceHistory = history;
     asset.marketDataSource = pair ? 'dexscreener' : 'coingecko';
     asset.historyDataSource = 'coingecko';
-    asset.marketDataAsOf = new Date(Number(quote.last_updated_at || now) * 1000).toISOString();
+    asset.marketDataAsOf = latest.date;
     asset.dex = pair ? {
       name: pair.dexId,
       pairAddress: pair.pairAddress,

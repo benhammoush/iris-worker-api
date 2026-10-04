@@ -6,10 +6,6 @@ test('market refresh combines CoinGecko history with the most liquid Stacks pair
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
     const value = String(url);
-    if (value.includes('/simple/price')) return {
-      ok: true,
-      json: async () => ({ blockstack: { usd: 1, usd_market_cap: 100, last_updated_at: 1760000000 }, alexgo: { usd: 2, usd_market_cap: 200, last_updated_at: 1760000000 } })
-    };
     if (value.includes('/market_chart')) return {
       ok: true,
       json: async () => ({ prices: [[Date.now() - 31 * 24 * 60 * 60 * 1000, 1], [Date.now() - 8 * 24 * 60 * 60 * 1000, 1], [Date.now() - 25 * 60 * 60 * 1000, 1], [Date.now(), 2]], market_caps: [[Date.now() - 31 * 24 * 60 * 60 * 1000, 10], [Date.now() - 8 * 24 * 60 * 60 * 1000, 10], [Date.now() - 25 * 60 * 60 * 1000, 10], [Date.now(), 20]], total_volumes: [[Date.now() - 31 * 24 * 60 * 60 * 1000, 30], [Date.now() - 8 * 24 * 60 * 60 * 1000, 30], [Date.now() - 25 * 60 * 60 * 1000, 30], [Date.now(), 40]] })
@@ -28,7 +24,7 @@ test('market refresh combines CoinGecko history with the most liquid Stacks pair
     assert.equal(market.source, 'mixed');
     assert.equal(market.historySource, 'coingecko');
     assert.equal(alex.price, 2.6);
-    assert.equal(alex.marketCap, '200');
+    assert.equal(alex.marketCap, '20');
     assert.equal(alex.marketDataSource, 'dexscreener');
     assert.equal(alex.historyDataSource, 'coingecko');
     assert.equal(alex.dex.pairAddress, 'high');
