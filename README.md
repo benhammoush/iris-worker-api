@@ -24,9 +24,9 @@ Pushes to `main` automatically deploy to Cloudflare after CI passes when the rep
 
 ## Snapshot behavior
 
-The production Cron runs every 15 minutes. Refresh fetches only Hiro fees, latest chain info, STX supply, and each public wallet's balances and up to 25 transactions with transfers from public Hiro endpoints. It never fetches market data from ALEX or token metadata at runtime, and never fetches NFT metadata. A complete versioned snapshot is written to KV before its pointer is published, so readers never receive a partial refresh.
+The production Cron runs every 15 minutes. Refresh fetches Hiro fees, latest chain info, STX supply, each public wallet's balances, up to 100 transactions with transfers, and metadata for wallet-discovered fungible tokens. A complete versioned snapshot is written to KV before its pointer is published, so readers never receive a partial refresh.
 
-With `COINGECKO_DEMO_API_KEY` configured, STX, ALEX, WELSH, LEO, and aBTC use CoinGecko historical market data and the most liquid matching Stacks DEX Screener pair for current price/liquidity. Other bundled assets remain snapshot-backed. Without the secret, all market assets use the bundled demonstration snapshot in `src/fixtures.js`. Response metadata includes `marketDataSource` and `marketDataAsOf`, while `snapshotState` describes only the freshness of the live-refresh snapshot.
+With `COINGECKO_DEMO_API_KEY` configured, curated assets use CoinGecko historical market data and the most liquid matching Stacks DexScreener pair for current price/liquidity. Tokens discovered in the configured wallets are appended to the catalog after Hiro metadata lookup; DexScreener can enrich their current price and 24-hour change when a liquid Stacks pair exists. A 7-day change is only supplied from a verified historical source. Missing values are `null`, never a fabricated zero. The bundled data in `src/fixtures.js` is an explicitly labeled outage fallback, not live pricing.
 
 Responses are JSON envelopes with `meta.requestId`; errors use `error.code`. Snapshot responses include `snapshotCreatedAt`, `refreshIntervalMinutes`, and `nextScheduledRefreshAt` (the next UTC cron boundary), plus `X-Snapshot-State`, and are `Cache-Control: no-store`. The resolver serves fresh data for up to 30 minutes, stale data for more than 30 minutes through 24 hours, then the bundled fixture snapshot.
 
@@ -34,4 +34,4 @@ Responses are JSON envelopes with `meta.requestId`; errors use `error.code`. Sna
 
 `GET /health`, `GET /ready`, `GET /v1/status`, `GET /v1/market`, `GET /v1/assets`, `GET /v1/assets/:symbol`, `GET /v1/swaps`, `GET /v1/wallets`, and `GET /v1/wallets/:address`.
 
-`/v1/wallets` returns public wallet metadata only. `/v1/wallets/:address` requires an exact configured address and returns its cached balances, portfolio total, and normalized recent transaction summary. See `openapi.yaml` for the minimal API contract. Browser CORS is limited to comma-separated `CORS_ORIGINS` values.
+`/v1/wallets` returns public wallet metadata only. `/v1/wallets/:address` requires an exact configured address and returns cached balances, `totalValue`, and grouped `activity` records; `portfolioTotal` and `transactions` remain compatibility aliases. Swap records are verified DEX transaction metadata only unless asset input/output can be proven. See `openapi.yaml` for the API contract. Browser CORS is limited to comma-separated `CORS_ORIGINS` values.

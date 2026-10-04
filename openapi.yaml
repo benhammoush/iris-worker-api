@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 2.3.1
+  version: 2.4.0
 paths:
   /health:
     get:
@@ -23,7 +23,7 @@ paths:
   /v1/assets:
     get:
       responses:
-        '200': { description: Curated market assets with provider provenance; unsupported assets use the bundled snapshot fallback }
+          '200': { description: Curated assets plus wallet-discovered fungible tokens. Market changes are null when no verified provider history exists. }
   /v1/assets/{symbol}:
     get:
       parameters:
@@ -37,7 +37,7 @@ paths:
   /v1/swaps:
     get:
       responses:
-        '200': { description: Curated-wallet swaps }
+          '200': { description: Verified curated-wallet DEX transaction records. input, output, side, and value are nullable until they can be proven. }
   /v1/wallets:
     get:
       description: Returns metadata for the fixed public third-party demo wallet addresses; no wallet credentials are required.
@@ -51,5 +51,5 @@ paths:
           required: true
           schema: { type: string }
       responses:
-        '200': { description: Cached public demo wallet balances, portfolio total, and normalized transactions }
+          '200': { description: Cached public wallet balances, totalValue, and grouped activity. Atomic transfer amounts remain strings. portfolioTotal and transactions are compatibility aliases. }
         '404': { description: CURATED_WALLET_NOT_FOUND }

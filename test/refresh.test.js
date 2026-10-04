@@ -43,29 +43,30 @@ test('refresh normalizes balances and transactions from the public Hiro endpoint
     const writes = new Map();
     const snapshot = await refreshSnapshot({ SNAPSHOTS: { put: async (key, value) => writes.set(key, value) } }, { wallets }, new Date('2026-10-02T12:00:00.000Z'));
     assert.equal(snapshot.swaps.length, 50);
-    assert.deepEqual(Object.keys(snapshot.swaps[0]), ['txId', 'wallet', 'timestamp', 'blockHeight', 'contractId', 'functionName', 'status']);
+    assert.deepEqual(Object.keys(snapshot.swaps[0]), ['id', 'txId', 'wallet', 'timestamp', 'blockHeight', 'contractId', 'functionName', 'status', 'input', 'output', 'side', 'value']);
     assert.equal(snapshot.swaps[0].untrusted, undefined);
     const demoA = snapshot.wallets[wallets[0].address];
     assert.equal(demoA.transactions.length, 25);
-    assert.deepEqual(demoA.transactions[0], {
-      txId: `${wallets[0].address}-0`, timestamp: '2026-01-01T00:00:00.000Z', blockHeight: 0, type: 'contract_call', status: 'success',
-      stxTransfers: [{ asset: 'STX', amount: '1', sender: 'SPsender', recipient: 'SPrecipient' }], ftTransfers: [],
-      nftTransfers: [{ asset: 'SP123.nft::collection', amount: '1', sender: 'SPsender', recipient: 'SPrecipient' }]
+    assert.deepEqual(demoA.transactions[0].transfers, {
+      stx: [{ asset: 'STX', amountAtomic: '1', amount: '1', sender: 'SPsender', recipient: 'SPrecipient' }], fungible: [],
+      nft: [{ asset: 'SP123.nft::collection', amountAtomic: '1', amount: '1', sender: 'SPsender', recipient: 'SPrecipient' }]
     });
+    assert.equal(demoA.transactions[0].id, `${wallets[0].address}-0`);
+    assert.strictEqual(demoA.activity, demoA.transactions);
     assert.deepEqual(demoA.assets.map(({ symbol, rawBalance, balance, price }) => ({ symbol, rawBalance, balance, price })), [
       { symbol: 'STX', rawBalance: '1234567', balance: 1.234567, price: MARKET_SNAPSHOT.assets[0].price },
       { symbol: 'ALEX', rawBalance: '2500000', balance: 0.025, price: MARKET_SNAPSHOT.assets[1].price }
     ]);
-    assert.equal(demoA.portfolioTotal, demoA.assets.reduce((total, asset) => total + asset.value, 0));
+    assert.equal(demoA.totalValue, demoA.portfolioTotal);
     assert.ok(requests.every((url) => url.startsWith('https://api.mainnet.hiro.so/')));
-    assert.equal(requests.filter((url) => url.includes('/transactions_with_transfers?limit=25&offset=0')).length, 3);
+    assert.equal(requests.filter((url) => url.includes('/transactions_with_transfers?limit=100&offset=0')).length, 3);
     assert.equal(requests.some((url) => url.includes('/metadata/')), false);
     assert.equal(requests.some((url) => url.includes('alexgo.io')), false);
     assert.equal(snapshot.market.history.length, snapshot.assets.length);
     assert.equal(snapshot.market.source, 'snapshot');
     assert.equal(snapshot.market.asOf, MARKET_SNAPSHOT.asOf);
     assert.equal(snapshot.market.stxSupply, 1000000);
-    assert.strictEqual(snapshot.assets, MARKET_SNAPSHOT.assets);
+    assert.deepEqual(snapshot.assets, MARKET_SNAPSHOT.assets);
     assert.equal(writes.size, 2);
   } finally {
     globalThis.fetch = originalFetch;

@@ -12,6 +12,8 @@ const LIVE_ASSETS = [
   { symbol: 'aBTC', coinId: 'xlink-bridged-btc-stacks', dexAddress: 'SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.token-abtc' }
 ];
 
+const definitionsByContract = new Map(LIVE_ASSETS.map((asset) => [asset.dexAddress, asset]));
+
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`Market provider request failed with ${response.status} at ${new URL(url).pathname}`);
@@ -40,7 +42,7 @@ function nearestPrice(history, target) {
   }, null)?.price;
 }
 
-export async function refreshMarket(apiKey) {
+export async function refreshMarket(apiKey, discoveredAssets = []) {
   if (!apiKey) return null;
   const headers = { 'x-cg-demo-api-key': apiKey };
   const charts = [];
@@ -55,12 +57,14 @@ export async function refreshMarket(apiKey) {
   let dexPairs = [];
   let dexAvailable = true;
   try {
-    dexPairs = await fetchJson(`${DEX_SCREENER}/tokens/v1/stacks/${LIVE_ASSETS.map((asset) => asset.dexAddress).join(',')}`);
+    const addresses = [...new Set([...LIVE_ASSETS.map((asset) => asset.dexAddress), ...discoveredAssets.map((asset) => asset.contractId)])];
+    dexPairs = await fetchJson(`${DEX_SCREENER}/tokens/v1/stacks/${addresses.join(',')}`);
   } catch (cause) {
     dexAvailable = false;
     console.warn('DexScreener refresh unavailable', { message: cause.message });
   }
-  const assets = MARKET_SNAPSHOT.assets.map((asset) => ({ ...asset }));
+  const assets = [...MARKET_SNAPSHOT.assets, ...discoveredAssets]
+    .reduce((unique, asset) => unique.some((item) => item.contractId === asset.contractId) ? unique : [...unique, { ...asset }], []);
 
   LIVE_ASSETS.forEach((definition, index) => {
     const asset = assets.find((item) => item.symbol === definition.symbol);
@@ -97,6 +101,32 @@ export async function refreshMarket(apiKey) {
       buys24h: pair.txns?.h24?.buys ?? null,
       sells24h: pair.txns?.h24?.sells ?? null
     } : null;
+  });
+
+  // Wallet-discovered assets are included even without a CoinGecko listing. DexScreener
+  // can provide a current price and 24h change, but never a trustworthy 7d history.
+  assets.forEach((asset) => {
+    if (definitionsByContract.has(asset.contractId)) return;
+    const pair = bestDexPair(dexPairs, asset.contractId);
+    if (!pair) return;
+    const price = Number(pair.priceUsd);
+    if (!Number.isFinite(price)) return;
+    asset.price = price;
+    asset.actualprice = price;
+    asset.change24h = Number.isFinite(Number(pair.priceChange?.h24)) ? Number(pair.priceChange.h24) : null;
+    asset.change7d = null;
+    asset.change30d = null;
+    asset.marketDataSource = 'dexscreener';
+    asset.marketDataAsOf = new Date().toISOString();
+    asset.dex = {
+      name: pair.dexId,
+      pairAddress: pair.pairAddress,
+      url: pair.url,
+      liquidityUsd: pair.liquidity?.usd ?? null,
+      volume24h: pair.volume?.h24 ?? null,
+      buys24h: pair.txns?.h24?.buys ?? null,
+      sells24h: pair.txns?.h24?.sells ?? null
+    };
   });
 
   return {

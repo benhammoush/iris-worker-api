@@ -38,7 +38,7 @@ test('unconfigured snapshots resolve to the bundled static market fixture', asyn
   assert.equal(response.status, 200);
   assert.equal(body.meta.snapshotState, 'fixture');
   assert.equal(body.data.length, 13);
-  assert.equal(body.data.every((asset) => asset.symbol && asset.name && asset.imageUrl && asset.contractId
+  assert.equal(body.data.every((asset) => asset.symbol && asset.name && typeof asset.imageUrl === 'string' && asset.contractId
     && Number.isFinite(Number(asset.decimals)) && asset.price !== undefined && asset.supply !== undefined
     && asset.totalSupply !== undefined && asset.marketCap !== undefined && asset.change24h !== undefined
     && asset.change7d !== undefined && asset.change30d !== undefined && Array.isArray(asset.priceHistory)), true);

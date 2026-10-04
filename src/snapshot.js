@@ -1,5 +1,5 @@
 import { FIXTURE_SNAPSHOT, MARKET_SNAPSHOT } from './fixtures.js';
-import { FRESH_AFTER_MS, MAX_SWAPS, MAX_TRANSACTIONS_PER_WALLET, SNAPSHOT_KEY_PREFIX, SNAPSHOT_POINTER_KEY, STALE_AFTER_MS } from './constants.js';
+import { FRESH_AFTER_MS, MAX_DISCOVERED_ASSETS, MAX_SWAPS, MAX_TRANSACTIONS_PER_WALLET, MAX_TRANSACTION_SCAN_PER_WALLET, SNAPSHOT_KEY_PREFIX, SNAPSHOT_POINTER_KEY, STALE_AFTER_MS } from './constants.js';
 import { refreshMarket } from './market.js';
 
 const HIRO = 'https://api.mainnet.hiro.so';
@@ -40,19 +40,25 @@ function normalizeSwap(wallet, transactionEntry) {
   const transaction = transactionEntry.tx || transactionEntry;
   const contractCall = transaction.contract_call || {};
   return {
+    id: transaction.tx_id,
     txId: transaction.tx_id,
     wallet,
     timestamp: transaction.burn_block_time_iso ?? transaction.block_time_iso ?? transaction.burn_block_time ?? transaction.block_time ?? null,
     blockHeight: transaction.block_height ?? null,
     contractId: contractCall.contract_id ?? null,
     functionName: contractCall.function_name ?? null,
-    status: transaction.tx_status ?? null
+    status: transaction.tx_status ?? null,
+    input: null,
+    output: null,
+    side: null,
+    value: null
   };
 }
 
 function normalizeTransfers(transfers = []) {
   return transfers.map((transfer) => ({
     asset: transfer.asset_identifier ?? 'STX',
+    amountAtomic: String(transfer.amount ?? '1'),
     amount: String(transfer.amount ?? '1'),
     sender: transfer.sender ?? null,
     recipient: transfer.recipient ?? null
@@ -61,16 +67,74 @@ function normalizeTransfers(transfers = []) {
 
 function normalizeTransaction(transactionEntry) {
   const transaction = transactionEntry.tx || transactionEntry;
+  const stxTransfers = normalizeTransfers(transactionEntry.stx_transfers ?? transaction.stx_transfers);
+  const ftTransfers = normalizeTransfers(transactionEntry.ft_transfers ?? transaction.ft_transfers);
+  const nftTransfers = normalizeTransfers(transactionEntry.nft_transfers ?? transaction.nft_transfers);
   return {
+    id: transaction.tx_id,
     txId: transaction.tx_id,
     timestamp: transaction.burn_block_time_iso ?? transaction.block_time_iso ?? transaction.burn_block_time ?? transaction.block_time ?? null,
     blockHeight: transaction.block_height ?? null,
     type: transaction.tx_type ?? null,
     status: transaction.tx_status ?? null,
-    stxTransfers: normalizeTransfers(transactionEntry.stx_transfers ?? transaction.stx_transfers),
-    ftTransfers: normalizeTransfers(transactionEntry.ft_transfers ?? transaction.ft_transfers),
-    nftTransfers: normalizeTransfers(transactionEntry.nft_transfers ?? transaction.nft_transfers)
+    transfers: { stx: stxTransfers, fungible: ftTransfers, nft: nftTransfers },
+    stxTransfers,
+    ftTransfers,
+    nftTransfers
   };
+}
+
+function isKnownSwap(transactionEntry) {
+  const transaction = transactionEntry.tx || transactionEntry;
+  const name = transaction.contract_call?.function_name || '';
+  return transaction.tx_status === 'success' && /(^|-)swap(?:-|$)|swap-helper/i.test(name);
+}
+
+function assetContractId(assetIdentifier) {
+  return assetIdentifier.split('::')[0];
+}
+
+function safeImageUrl(value) {
+  if (typeof value !== 'string' || !value) return '';
+  if (value.startsWith('ipfs://')) return `https://ipfs.io/ipfs/${value.slice(7).replace(/^ipfs\//, '')}`;
+  try { return new URL(value).protocol === 'https:' ? value : ''; } catch { return ''; }
+}
+
+async function discoverAssets(balancePayloads, knownAssets) {
+  const knownContractIds = new Set(knownAssets.map((asset) => asset.contractId));
+  const contractIds = [...new Set(balancePayloads.flatMap((balances) => Object.keys(balances.fungible_tokens || {}).map(assetContractId)))]
+    .filter((contractId) => !knownContractIds.has(contractId))
+    .slice(0, MAX_DISCOVERED_ASSETS);
+  const discovered = await Promise.all(contractIds.map(async (contractId) => {
+    try {
+      const metadata = await fetchJson(`${HIRO}/metadata/v1/ft/${encodeURIComponent(contractId)}`);
+      const decimals = Number(metadata.decimals);
+      if (!Number.isInteger(decimals) || decimals < 0) return null;
+      const symbol = metadata.symbol || contractId.split('.')[1];
+      return {
+        symbol,
+        name: metadata.name || symbol,
+        imageUrl: safeImageUrl(metadata.image_canonical_uri || metadata.image_thumbnail_uri || metadata.image_uri),
+        contractId,
+        decimals,
+        price: null,
+        supply: null,
+        totalSupply: metadata.total_supply ?? null,
+        marketCap: null,
+        change24h: null,
+        change7d: null,
+        change30d: null,
+        priceHistory: [],
+        metadataSource: 'hiro',
+        marketDataSource: null,
+        historyDataSource: null
+      };
+    } catch (cause) {
+      console.warn('Token metadata unavailable', { contractId, message: cause.message });
+      return null;
+    }
+  }));
+  return discovered.filter(Boolean);
 }
 
 function numericBalance(rawBalance, decimals) {
@@ -89,7 +153,7 @@ function buildWalletAssets(balances, assets) {
     if (typeof rawBalance !== 'string' || !/^\d+$/.test(rawBalance)) return [];
     const balance = numericBalance(rawBalance, asset.decimals);
     const price = Number(asset.price);
-    if (balance === null || !Number.isFinite(price)) return [];
+    if (balance === null) return [];
     return [{
       symbol: asset.symbol,
       name: asset.name,
@@ -99,44 +163,52 @@ function buildWalletAssets(balances, assets) {
       rawBalance,
       balance,
       price: asset.price,
-      value: price * rawBalance / 10 ** asset.decimals
+      value: Number.isFinite(price) ? price * rawBalance / 10 ** asset.decimals : null
     }];
   });
 }
 
-async function fetchWalletData(wallet, assets) {
+async function fetchWalletSource(wallet) {
   const address = wallet.address;
   const [balances, transactionPayload] = await Promise.all([
     fetchJson(`${HIRO}/extended/v1/address/${address}/balances`),
-    fetchJson(`${HIRO}/extended/v1/address/${address}/transactions_with_transfers?limit=${MAX_TRANSACTIONS_PER_WALLET}&offset=0`)
+    fetchJson(`${HIRO}/extended/v1/address/${address}/transactions_with_transfers?limit=${MAX_TRANSACTION_SCAN_PER_WALLET}&offset=0`)
   ]);
-  const transactions = (transactionPayload.results || []).slice(0, MAX_TRANSACTIONS_PER_WALLET);
-  const walletAssets = buildWalletAssets(balances, assets);
-  const swaps = transactions
-    .filter((transaction) => {
-      const tx = transaction.tx || transaction;
-      return tx.contract_call?.function_name === 'swap-helper' && tx.tx_status === 'success';
-    })
-    .map((transaction) => normalizeSwap(address, transaction));
+  return { balances, transactions: transactionPayload.results || [] };
+}
+
+function buildWalletData(wallet, source, assets) {
+  const transactions = source.transactions.slice(0, MAX_TRANSACTIONS_PER_WALLET);
+  const walletAssets = buildWalletAssets(source.balances, assets);
+  const activity = transactions.map(normalizeTransaction);
+  const swaps = source.transactions
+    .filter(isKnownSwap)
+    .map((transaction) => normalizeSwap(wallet.address, transaction));
+  const totalValue = walletAssets.reduce((total, asset) => total + (Number.isFinite(asset.value) ? asset.value : 0), 0);
   return {
     label: wallet.label,
     description: wallet.description,
     assets: walletAssets,
-    portfolioTotal: walletAssets.reduce((total, asset) => total + asset.value, 0),
-    transactions: transactions.map(normalizeTransaction),
+    totalValue,
+    portfolioTotal: totalValue,
+    activity,
+    transactions: activity,
     swaps
   };
 }
 
 export async function refreshSnapshot(env, config, now = new Date()) {
-  const [fees, info, stxSupply, refreshedMarket] = await Promise.all([
+  const [fees, info, stxSupply, walletSources] = await Promise.all([
     fetchJson(`${HIRO}/extended/v2/mempool/fees`),
     fetchJson(`${HIRO}/v2/info`),
     fetchJson(`${HIRO}/extended/v1/stx_supply`),
-    refreshMarket(env.COINGECKO_DEMO_API_KEY)
+    Promise.all(config.wallets.map(async (wallet) => [wallet.address, await fetchWalletSource(wallet)]))
   ]);
-  const assets = refreshedMarket?.assets || MARKET_SNAPSHOT.assets;
-  const walletEntries = await Promise.all(config.wallets.map(async (wallet) => [wallet.address, await fetchWalletData(wallet, assets)]));
+  const discoveredAssets = await discoverAssets(walletSources.map(([, source]) => source.balances), MARKET_SNAPSHOT.assets);
+  const refreshedMarket = await refreshMarket(env.COINGECKO_DEMO_API_KEY, discoveredAssets);
+  const assets = refreshedMarket?.assets || [...MARKET_SNAPSHOT.assets, ...discoveredAssets];
+  const sourcesByAddress = Object.fromEntries(walletSources);
+  const walletEntries = config.wallets.map((wallet) => [wallet.address, buildWalletData(wallet, sourcesByAddress[wallet.address], assets)]);
   const wallets = Object.fromEntries(walletEntries);
   const swaps = walletEntries
     .flatMap(([, data]) => data.swaps)
