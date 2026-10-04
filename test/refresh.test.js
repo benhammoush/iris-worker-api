@@ -32,10 +32,10 @@ test('arbitrary public wallet lookup uses Helius without numeric raw balances', 
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test('refresh writes the Solana fixture when Helius is not configured', async () => {
+test('refresh does not publish a new fixture when Helius is not configured', async () => {
   const writes = new Map();
-  const snapshot = await refreshSnapshot({ SNAPSHOTS: { put: async (key, value) => writes.set(key, value) } }, {}, new Date('2026-10-02T12:00:00.000Z'));
+  const snapshot = await refreshSnapshot({ SNAPSHOTS: { get: async () => null, put: async (key, value) => writes.set(key, value) } }, {}, new Date('2026-10-02T12:00:00.000Z'));
   assert.equal(snapshot.source, 'fixture');
   assert.equal(snapshot.assets[0].mint, SOL_MINT);
-  assert.equal(writes.size, 2);
+  assert.equal(writes.size, 0);
 });

@@ -1,7 +1,29 @@
-import { API_VERSION, REFRESH_INTERVAL_MINUTES, REFRESH_INTERVAL_MS } from './constants.js';
+import { API_VERSION, FRESH_AFTER_MS, HISTORY_KEY_PREFIX, REFRESH_INTERVAL_MINUTES, REFRESH_INTERVAL_MS, STALE_AFTER_MS } from './constants.js';
 import { error, json } from './http.js';
+import { fetchPriceHistory } from './market.js';
 import { isUsableSnapshot, loadWalletData, resolveSnapshot } from './snapshot.js';
 import { isBase58PublicKey } from './transforms.js';
+
+function usableHistory(history) {
+  return history && typeof history === 'object' && Number.isFinite(Date.parse(history.fetchedAt)) && Array.isArray(history.points);
+}
+
+async function historyForAsset(kv, mint) {
+  const key = `${HISTORY_KEY_PREFIX}${mint}`;
+  const cached = kv ? await kv.get(key, 'json') : null;
+  const age = usableHistory(cached) ? Date.now() - Date.parse(cached.fetchedAt) : Infinity;
+  if (age >= 0 && age <= FRESH_AFTER_MS) return { points: cached.points, state: 'fresh', fetchedAt: cached.fetchedAt };
+  try {
+    const points = await fetchPriceHistory(mint);
+    if (!points) return age >= 0 && age <= STALE_AFTER_MS ? { points: cached.points, state: 'stale', fetchedAt: cached.fetchedAt } : { points: null, state: 'unavailable', fetchedAt: null };
+    const fetchedAt = new Date().toISOString();
+    if (kv?.put) await kv.put(key, JSON.stringify({ version: 1, mint, source: 'geckoterminal', fetchedAt, points }));
+    return { points, state: 'fresh', fetchedAt };
+  } catch (cause) {
+    console.warn('GeckoTerminal history unavailable', { mint, message: cause.message });
+    return age >= 0 && age <= STALE_AFTER_MS ? { points: cached.points, state: 'stale', fetchedAt: cached.fetchedAt } : { points: null, state: 'unavailable', fetchedAt: null };
+  }
+}
 
 export async function route(request, env, config, id, origin) {
   const url = new URL(request.url);
@@ -40,7 +62,9 @@ export async function route(request, env, config, id, origin) {
     try { mint = decodeURIComponent(encodedId); } catch { return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin); }
     if (!isBase58PublicKey(mint)) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
     const asset = snapshot.assets.find((item) => item.mint === mint);
-    return asset ? json({ data: asset, meta }, 200, id, origin, snapshotHeaders) : error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
+    if (!asset) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
+    const history = await historyForAsset(env.SNAPSHOTS, mint);
+    return json({ data: { ...asset, priceHistory: history.points, historyDataSource: history.points ? 'geckoterminal' : null }, meta: { ...meta, historyDataSource: history.points ? 'geckoterminal' : null, historyState: state === 'fixture' ? 'fixture' : history.state, historyFetchedAt: history.fetchedAt } }, 200, id, origin, snapshotHeaders);
   }
   if (url.pathname.startsWith(`${versionPrefix}/assets/`)) {
     const assetPath = url.pathname.slice(`${versionPrefix}/assets/`.length);

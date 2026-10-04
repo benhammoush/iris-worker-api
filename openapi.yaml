@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 3.1.0
+  version: 3.2.0
 paths:
   /internal/refresh:
     post:
@@ -26,11 +26,11 @@ paths:
   /v2/market:
     get:
       responses:
-          '200': { description: Finalized Solana slot plus Jupiter market data and GeckoTerminal 7-day history when available. }
+          '200': { description: Finalized Solana slot plus the current Jupiter catalog. Price history is available from asset detail. }
   /v2/assets:
     get:
       responses:
-          '200': { description: Solana assets identified by canonical mint address. Market changes are null when no verified provider history exists. }
+          '200': { description: Up to 50 verified top-traded Solana assets, identified by canonical mint address. Missing provider values are null. }
   /v2/assets/mint/{mint}:
     get:
       parameters:
@@ -39,7 +39,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
-          '200': { description: Asset found by its canonical mint address. }
+          '200': { description: Asset found by its canonical mint address, with up to seven daily GeckoTerminal price points when available. History metadata reports fresh, stale, fixture, or unavailable state. }
         '404': { description: Asset not found }
   /v2/assets/{symbol}:
     get:

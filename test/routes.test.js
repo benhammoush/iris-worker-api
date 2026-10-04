@@ -17,11 +17,16 @@ test('protected refresh rejects requests without its token', async () => {
 });
 
 test('v2 is canonical and v1 remains an asset route alias', async () => {
-  const v2 = await worker.fetch(new Request('https://api.example/v2/assets/mint/' + SOL_MINT), env(), {});
-  const v1 = await worker.fetch(new Request('https://api.example/v1/assets/id/' + SOL_MINT), env(), {});
-  const asset = (await v2.json()).data;
-  assert.equal(v2.status, 200); assert.equal(v1.status, 200);
-  assert.equal(asset.chain, 'solana'); assert.equal(asset.mint, SOL_MINT); assert.equal(asset.contractId, SOL_MINT);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ data: { attributes: { ohlcv_list: [[1_760_000_000, 1, 1, 1, 150]] } } }) });
+  try {
+    const v2 = await worker.fetch(new Request('https://api.example/v2/assets/mint/' + SOL_MINT), env(), {});
+    const v1 = await worker.fetch(new Request('https://api.example/v1/assets/id/' + SOL_MINT), env(), {});
+    const asset = (await v2.json()).data;
+    assert.equal(v2.status, 200); assert.equal(v1.status, 200);
+    assert.equal(asset.chain, 'solana'); assert.equal(asset.mint, SOL_MINT); assert.equal(asset.contractId, SOL_MINT);
+    assert.equal(asset.priceHistory[0].price, 150);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test('fixture responses preserve cache, CORS, and snapshot envelopes', async () => {

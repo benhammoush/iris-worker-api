@@ -24,7 +24,7 @@ async function heliusEnhanced(path, apiKey) {
 export function isUsableSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object' || !Number.isFinite(Date.parse(snapshot.createdAt))) return false;
   return snapshot.market && typeof snapshot.market === 'object' && typeof snapshot.market.source === 'string' && Number.isFinite(Date.parse(snapshot.market.asOf))
-    && Array.isArray(snapshot.assets) && snapshot.assets.every((asset) => asset && typeof asset.symbol === 'string' && typeof asset.name === 'string' && typeof asset.mint === 'string' && isBase58PublicKey(asset.mint) && asset.contractId === asset.mint && Array.isArray(asset.priceHistory))
+    && Array.isArray(snapshot.assets) && snapshot.assets.every((asset) => asset && typeof asset.symbol === 'string' && typeof asset.name === 'string' && typeof asset.mint === 'string' && isBase58PublicKey(asset.mint) && asset.contractId === asset.mint && (asset.priceHistory === null || Array.isArray(asset.priceHistory)))
     && snapshot.wallets && typeof snapshot.wallets === 'object' && !Array.isArray(snapshot.wallets) && Array.isArray(snapshot.swaps);
 }
 
@@ -104,11 +104,11 @@ async function fetchTrackedPoolSwaps(apiKey) {
 
 function fallbackAsset(mint, decimals = 0) {
   const existing = MARKET_SNAPSHOT.assets.find((asset) => asset.mint === mint);
-  return existing || { ...assetIdentity(mint), symbol: mint.slice(0, 8), name: mint, imageUrl: '', decimals, price: null, supply: null, totalSupply: null, marketCap: null, change24h: null, change7d: null, change30d: null, priceHistory: [], actualprice: null, image: '', marketcap: null, pricedayminusone: null, percentdayminusone: null, priceweekminusone: null, percentweekminusone: null, pricemonthminusone: null, percentmonthminusone: null, contractname: mint };
+  return existing || { ...assetIdentity(mint), symbol: mint.slice(0, 8), name: mint, imageUrl: '', decimals, price: null, supply: null, totalSupply: null, marketCap: null, change24h: null, change7d: null, change30d: null, priceHistory: null, actualprice: null, image: '', marketcap: null, pricedayminusone: null, percentdayminusone: null, priceweekminusone: null, percentweekminusone: null, pricemonthminusone: null, percentmonthminusone: null, contractname: mint };
 }
 
 function buildWalletData(wallet, source, assets) {
-  if (!source) return { label: wallet.label, description: wallet.description, chain: 'solana', assets: [], totalValue: 0, portfolioTotal: 0, activity: [], transactions: [], swaps: [] };
+  if (!source) return { label: wallet.label, description: wallet.description, chain: 'solana', assets: [], totalValue: null, portfolioTotal: null, activity: [], transactions: [], swaps: [] };
   const balances = [{ mint: SOL_MINT, rawAmount: source.nativeRawAmount, decimals: 9 }, ...source.tokenBalances];
   const assetByMint = new Map(assets.map((asset) => [asset.mint, asset]));
   const walletAssets = balances.map(({ mint, rawAmount, decimals }) => {
@@ -120,7 +120,7 @@ function buildWalletData(wallet, source, assets) {
   });
   const transactions = source.transactions.slice(0, MAX_TRANSACTIONS_PER_WALLET).map(normalizeTransaction);
   const swaps = source.transactions.filter(isRegisteredDexSwap).map((transaction) => normalizeSwap(wallet.address, transaction));
-  const totalValue = walletAssets.reduce((total, asset) => total + (typeof asset.value === 'number' ? asset.value : 0), 0);
+  const totalValue = walletAssets.every((asset) => typeof asset.value === 'number') ? walletAssets.reduce((total, asset) => total + asset.value, 0) : null;
   return { label: wallet.label, description: wallet.description, chain: 'solana', assets: walletAssets, totalValue, portfolioTotal: totalValue, activity: transactions, transactions, swaps };
 }
 
@@ -141,23 +141,21 @@ export async function loadWalletData(env, config, address) {
 
 export async function refreshSnapshot(env, config, now = new Date()) {
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
-  if (!apiKey) {
-    const snapshot = { ...FIXTURE_SNAPSHOT, createdAt: now.toISOString() };
-    await env.SNAPSHOTS.put(`${SNAPSHOT_KEY_PREFIX}${now.getTime()}`, JSON.stringify(snapshot));
-    await env.SNAPSHOTS.put(SNAPSHOT_POINTER_KEY, JSON.stringify({ key: `${SNAPSHOT_KEY_PREFIX}${now.getTime()}`, createdAt: snapshot.createdAt }));
-    return snapshot;
-  }
+  const existing = await resolveSnapshot(env.SNAPSHOTS, now.getTime());
+  if (!apiKey) return existing.state === 'fixture' ? FIXTURE_SNAPSHOT : existing.snapshot;
   const [trackedPoolResult, slotResult] = await Promise.all([
     fetchTrackedPoolSwaps(apiKey).catch((cause) => { console.warn('Tracked pool swaps unavailable', { message: cause.message }); return []; }),
     heliusRpc('getSlot', [{ commitment: 'finalized' }], apiKey).catch(() => null)
   ]);
-  const mints = [SOL_MINT];
-  const market = await refreshMarket(config.jupiterApiKey || env.JUPITER_API_KEY, mints);
-  const marketAssetsByMint = new Map((market?.assets || []).map((asset) => [asset.mint, asset]));
-  const assets = mints.map((mint) => marketAssetsByMint.get(mint) || fallbackAsset(mint));
+  const market = await refreshMarket(config.jupiterApiKey || env.JUPITER_API_KEY);
+  if (!market || !market.assets.length) {
+    if (existing.state !== 'fixture') return existing.snapshot;
+    throw new Error('Jupiter market discovery is unavailable and no usable snapshot exists.');
+  }
+  const assets = market.assets;
   const wallets = {};
   const swaps = trackedPoolResult.sort((left, right) => String(right.timestamp ?? '').localeCompare(String(left.timestamp ?? ''))).slice(0, MAX_SWAPS);
-  const snapshot = { version: 2, createdAt: now.toISOString(), source: market ? 'helius-jupiter' : 'helius', market: { fees: null, slot: slotResult, block_height: slotResult, source: market?.source || 'fixture', asOf: market?.asOf || MARKET_SNAPSHOT.asOf, historySource: market?.historySource || null, liveAssetCount: market?.liveAssetCount || 0, swaps: { count: swaps.length, asOf: new Date().toISOString(), source: 'helius-decoded-tracked-pools', scope: 'registered-liquid-pools', error: null }, history: assets.map((asset) => ({ mint: asset.mint, symbol: asset.symbol, points: asset.priceHistory })) }, assets, wallets, swaps };
+  const snapshot = { version: 2, createdAt: now.toISOString(), source: 'helius-jupiter', market: { fees: null, slot: slotResult, block_height: slotResult, source: market.source, asOf: market.asOf, historySource: null, liveAssetCount: market.liveAssetCount, swaps: { count: swaps.length, asOf: new Date().toISOString(), source: 'helius-decoded-tracked-pools', scope: 'registered-liquid-pools', error: null }, history: [] }, assets, wallets, swaps };
   const key = `${SNAPSHOT_KEY_PREFIX}${now.getTime()}`;
   await env.SNAPSHOTS.put(key, JSON.stringify(snapshot));
   await env.SNAPSHOTS.put(SNAPSHOT_POINTER_KEY, JSON.stringify({ key, createdAt: snapshot.createdAt }));
