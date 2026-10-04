@@ -1,4 +1,4 @@
-export const API_VERSION = '2.1.5';
+export const API_VERSION = '2.1.6';
 export const SNAPSHOT_POINTER_KEY = 'snapshot:current';
 export const SNAPSHOT_KEY_PREFIX = 'snapshot:v1:';
 export const REFRESH_INTERVAL_MS = 15 * 60 * 1000;

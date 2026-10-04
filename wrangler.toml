@@ -2,6 +2,10 @@ name = "iris-api"
 main = "src/index.js"
 compatibility_date = "2026-10-02"
 
+[observability.logs]
+enabled = true
+invocation_logs = true
+
 [vars]
 CORS_ORIGINS = "http://localhost:3000,http://localhost:5173"
 
