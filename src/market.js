@@ -1,4 +1,5 @@
 import { MARKET_SNAPSHOT } from './fixtures.js';
+import { priceChangePercent } from './transforms.js';
 
 const COINGECKO = 'https://api.coingecko.com/api/v3';
 const DEX_SCREENER = 'https://api.dexscreener.com';
@@ -32,41 +33,50 @@ function bestDexPair(pairs, address) {
     .sort((left, right) => Number(right.liquidity?.usd || 0) - Number(left.liquidity?.usd || 0))[0];
 }
 
+function nearestPrice(history, target) {
+  return history.reduce((closest, point) => {
+    if (!closest || Math.abs(Date.parse(point.date) - target) < Math.abs(Date.parse(closest.date) - target)) return point;
+    return closest;
+  }, null)?.price;
+}
+
 export async function refreshMarket(apiKey) {
   if (!apiKey) return null;
   const ids = LIVE_ASSETS.map((asset) => asset.coinId);
   const headers = { 'x-cg-demo-api-key': apiKey };
-  const [coins, ...charts] = await Promise.all([
-    fetchJson(`${COINGECKO}/coins/markets?vs_currency=usd&ids=${ids.join(',')}&price_change_percentage=24h,7d,30d`, { headers }),
+  const [prices, ...charts] = await Promise.all([
+    fetchJson(`${COINGECKO}/simple/price?ids=${ids.join(',')}&vs_currencies=usd&include_market_cap=true&include_24hr_vol=true&include_24hr_change=true&include_last_updated_at=true`, { headers }),
     ...LIVE_ASSETS.map((asset) => fetchJson(`${COINGECKO}/coins/${asset.coinId}/market_chart?vs_currency=usd&days=365`, { headers }))
   ]);
   const dexPairs = await fetchJson(`${DEX_SCREENER}/tokens/v1/stacks/${LIVE_ASSETS.map((asset) => asset.dexAddress).join(',')}`);
-  const coinsById = new Map(coins.map((coin) => [coin.id, coin]));
   const assets = MARKET_SNAPSHOT.assets.map((asset) => ({ ...asset }));
 
   LIVE_ASSETS.forEach((definition, index) => {
     const asset = assets.find((item) => item.symbol === definition.symbol);
-    const coin = coinsById.get(definition.coinId);
-    if (!asset || !coin) return;
+    const quote = prices[definition.coinId];
+    if (!asset || !quote) return;
     const pair = bestDexPair(dexPairs, definition.dexAddress);
-    const price = Number(pair?.priceUsd ?? coin.current_price);
+    const history = historyFrom(charts[index]);
+    const price = Number(pair?.priceUsd ?? quote.usd);
     if (!Number.isFinite(price)) return;
+    const now = Date.now();
+    const dayPrice = nearestPrice(history, now - 24 * 60 * 60 * 1000);
+    const weekPrice = nearestPrice(history, now - 7 * 24 * 60 * 60 * 1000);
+    const monthPrice = nearestPrice(history, now - 30 * 24 * 60 * 60 * 1000);
     asset.price = price;
     asset.actualprice = price;
-    asset.marketCap = String(coin.market_cap ?? asset.marketCap);
+    asset.marketCap = String(quote.usd_market_cap ?? asset.marketCap);
     asset.marketcap = asset.marketCap;
-    asset.change24h = Number(coin.price_change_percentage_24h_in_currency ?? asset.change24h);
-    asset.change7d = Number(coin.price_change_percentage_7d_in_currency ?? asset.change7d);
-    asset.change30d = Number(coin.price_change_percentage_30d_in_currency ?? asset.change30d);
+    asset.change24h = Number.isFinite(Number(dayPrice)) ? priceChangePercent(price, dayPrice) : asset.change24h;
+    asset.change7d = Number.isFinite(Number(weekPrice)) ? priceChangePercent(price, weekPrice) : asset.change7d;
+    asset.change30d = Number.isFinite(Number(monthPrice)) ? priceChangePercent(price, monthPrice) : asset.change30d;
     asset.percentdayminusone = asset.change24h;
     asset.percentweekminusone = asset.change7d;
     asset.percentmonthminusone = asset.change30d;
-    asset.imageUrl = coin.image || asset.imageUrl;
-    asset.image = asset.imageUrl;
-    asset.priceHistory = historyFrom(charts[index]);
+    asset.priceHistory = history;
     asset.marketDataSource = pair ? 'dexscreener' : 'coingecko';
     asset.historyDataSource = 'coingecko';
-    asset.marketDataAsOf = coin.last_updated;
+    asset.marketDataAsOf = new Date(Number(quote.last_updated_at || now) * 1000).toISOString();
     asset.dex = pair ? {
       name: pair.dexId,
       pairAddress: pair.pairAddress,
