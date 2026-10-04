@@ -21,7 +21,7 @@ test('refresh normalizes balances and transactions from the public Hiro endpoint
        if (value.includes('/metadata/v1/ft/')) return { symbol: 'ALEX', name: 'ALEX', decimals: 8, total_supply: '1', contract_principal: 'SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.age000-governance-token', image_uri: 'https://images.example/alex.png' };
        if (value.includes('/extended/v1/tx?')) return { results: Array.from({ length: 60 }, (_, index) => ({
          tx_id: `chain-${index}`, burn_block_time_iso: `2026-01-01T00:${String(index % 60).padStart(2, '0')}:00.000Z`, block_height: index,
-         tx_type: 'contract_call', tx_status: 'success', contract_call: { contract_id: 'SP123.dex', function_name: 'swap-helper' }
+         tx_type: 'contract_call', tx_status: 'success', contract_call: { contract_id: 'SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-swap-router-v-1-2', function_name: 'swap-y-for-x-simple-range-multi' }, events: [{ action: 'swap-y-for-x' }]
        })) };
       const wallet = wallets.find(({ address }) => value.includes(address));
       if (value.includes('/balances')) return {

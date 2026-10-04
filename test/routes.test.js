@@ -59,6 +59,7 @@ test('status distinguishes the static market snapshot from refresh freshness', a
   assert.equal(response.status, 200);
   assert.deepEqual(body.data.marketData, { source: 'snapshot', asOf: '2025-06-30T00:00:00.000Z' });
   assert.equal(body.data.snapshot.state, 'fixture');
+  assert.equal(body.data.swaps.count, 0);
 });
 
 test('ready resolves usable snapshot data rather than only probing KV', async () => {

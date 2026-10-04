@@ -1,14 +1,27 @@
-// These are the common swap entry points observed across supported Stacks DEX
-// contracts. Contract-specific decoders can be added here as protocols are verified.
-const SWAP_FUNCTIONS = new Set(['swap', 'swap-helper', 'swap-x-for-y', 'swap-y-for-x']);
+// Contract and function pairs are deliberately explicit. A matching function name
+// on an unknown contract is not enough evidence to classify a transaction as a swap.
+const DEX_ROUTES = [{
+  protocol: 'ALEX DLMM',
+  contractId: 'SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-swap-router-v-1-2',
+  functions: new Set(['swap-y-for-x-simple-range-multi'])
+}];
+
+function routeFor(transactionEntry) {
+  const transaction = transactionEntry.tx || transactionEntry;
+  const call = transaction.contract_call;
+  return DEX_ROUTES.find((route) => route.contractId === call?.contract_id && route.functions.has(call?.function_name));
+}
+
+function hasSwapEvent(transactionEntry) {
+  const transaction = transactionEntry.tx || transactionEntry;
+  return Array.isArray(transaction.events) && transaction.events.some((event) => /^swap(?:-|$)/i.test(event.action || ''));
+}
 
 export function isRegisteredDexSwap(transactionEntry) {
   const transaction = transactionEntry.tx || transactionEntry;
-  const call = transaction.contract_call;
-  return transaction.tx_status === 'success' && call?.contract_id && SWAP_FUNCTIONS.has(call.function_name);
+  return transaction.tx_status === 'success' && Boolean(routeFor(transactionEntry)) && hasSwapEvent(transactionEntry);
 }
 
 export function protocolForSwap(transactionEntry) {
-  const contractId = (transactionEntry.tx || transactionEntry).contract_call?.contract_id || '';
-  return contractId.includes('.alex') ? 'ALEX' : 'Stacks DEX';
+  return routeFor(transactionEntry)?.protocol || null;
 }

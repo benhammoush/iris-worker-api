@@ -26,7 +26,7 @@ export async function route(request, env, config, id, origin) {
     nextScheduledRefreshAt: new Date((Math.floor(Date.now() / REFRESH_INTERVAL_MS) + 1) * REFRESH_INTERVAL_MS).toISOString()
   };
   const snapshotHeaders = { 'cache-control': 'no-store', 'x-snapshot-state': state };
-  if (url.pathname === '/v1/status') return json({ data: { version: API_VERSION, snapshot: { state, createdAt: snapshot.createdAt, source: snapshot.source }, marketData: { source: snapshot.market.source, asOf: snapshot.market.asOf } }, meta }, 200, id, origin, snapshotHeaders);
+  if (url.pathname === '/v1/status') return json({ data: { version: API_VERSION, snapshot: { state, createdAt: snapshot.createdAt, source: snapshot.source }, marketData: { source: snapshot.market.source, asOf: snapshot.market.asOf }, swaps: snapshot.market.swaps || { count: snapshot.swaps.length, asOf: null, source: 'unknown', error: null } }, meta }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v1/market') return json({ data: snapshot.market, meta }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v1/assets') return json({ data: snapshot.assets, meta }, 200, id, origin, snapshotHeaders);
   if (url.pathname.startsWith('/v1/assets/id/')) {

@@ -183,10 +183,14 @@ async function fetchCuratedMetadata() {
 async function fetchGlobalSwaps() {
   try {
     const payload = await fetchJson(`${HIRO}/extended/v1/tx?limit=${MAX_GLOBAL_TRANSACTION_SCAN}&offset=0`);
-    return (payload.results || []).filter(isRegisteredDexSwap).map((transaction) => normalizeSwap(null, transaction));
+    return {
+      swaps: (payload.results || []).filter(isRegisteredDexSwap).map((transaction) => normalizeSwap(null, transaction)),
+      error: null,
+      asOf: new Date().toISOString()
+    };
   } catch (cause) {
     console.warn('Global swap refresh unavailable', { message: cause.message });
-    return [];
+    return { swaps: [], error: 'UPSTREAM_UNAVAILABLE', asOf: null };
   }
 }
 
@@ -231,6 +235,7 @@ async function fetchWalletSource(wallet) {
 }
 
 function buildWalletData(wallet, source, assets) {
+  if (!source) return { label: wallet.label, description: wallet.description, assets: [], totalValue: 0, portfolioTotal: 0, activity: [], transactions: [], swaps: [] };
   const transactions = source.transactions.slice(0, MAX_TRANSACTIONS_PER_WALLET);
   const walletAssets = buildWalletAssets(source.balances, assets);
   const activity = transactions.map(normalizeTransaction);
@@ -251,15 +256,16 @@ function buildWalletData(wallet, source, assets) {
 }
 
 export async function refreshSnapshot(env, config, now = new Date()) {
-  const [fees, info, stxSupply, walletSources, catalogCandidates, curatedMetadata, globalSwaps] = await Promise.all([
+  const [fees, info, stxSupply, walletResults, catalogCandidates, curatedMetadata, globalSwapResult] = await Promise.all([
     fetchJson(`${HIRO}/extended/v2/mempool/fees`),
     fetchJson(`${HIRO}/v2/info`),
     fetchJson(`${HIRO}/extended/v1/stx_supply`),
-    Promise.all(config.wallets.map(async (wallet) => [wallet.address, await fetchWalletSource(wallet)])),
+    Promise.allSettled(config.wallets.map(async (wallet) => [wallet.address, await fetchWalletSource(wallet)])),
     fetchTradableCandidates(),
     fetchCuratedMetadata(),
     fetchGlobalSwaps()
   ]);
+  const walletSources = walletResults.filter((result) => result.status === 'fulfilled').map((result) => result.value);
   const discoveredAssets = await discoverAssets(walletSources.map(([, source]) => source.balances), MARKET_SNAPSHOT.assets);
   const refreshedMarket = await refreshMarket(env.COINGECKO_DEMO_API_KEY, [...catalogCandidates, ...curatedMetadata, ...discoveredAssets]);
   const marketAssets = refreshedMarket?.assets || [...MARKET_SNAPSHOT.assets, ...discoveredAssets];
@@ -267,7 +273,7 @@ export async function refreshSnapshot(env, config, now = new Date()) {
   const sourcesByAddress = Object.fromEntries(walletSources);
   const walletEntries = config.wallets.map((wallet) => [wallet.address, buildWalletData(wallet, sourcesByAddress[wallet.address], assets)]);
   const wallets = Object.fromEntries(walletEntries);
-  const swaps = globalSwaps
+  const swaps = globalSwapResult.swaps
     .sort((left, right) => String(right.timestamp ?? '').localeCompare(String(left.timestamp ?? '')))
     .slice(0, MAX_SWAPS);
   const snapshot = {
@@ -283,6 +289,7 @@ export async function refreshSnapshot(env, config, now = new Date()) {
       asOf: refreshedMarket?.asOf || MARKET_SNAPSHOT.asOf,
       historySource: refreshedMarket?.historySource || 'snapshot',
       liveAssetCount: refreshedMarket?.liveAssetCount || 0,
+      swaps: { count: swaps.length, asOf: globalSwapResult.asOf, source: 'hiro', error: globalSwapResult.error },
       history: assets.map((asset) => ({ symbol: asset.symbol, points: asset.priceHistory }))
     },
     assets,
