@@ -14,6 +14,13 @@ test('health returns a request ID envelope without needing a snapshot', async ()
   assert.ok(body.meta.requestId);
 });
 
+test('deployment refresh rejects requests without the Worker refresh token', async () => {
+  const response = await worker.fetch(new Request('https://api.example/internal/refresh', { method: 'POST' }), env({ REFRESH_TOKEN: 'expected' }), {});
+  const body = await response.json();
+  assert.equal(response.status, 401);
+  assert.equal(body.error.code, 'REFRESH_UNAUTHORIZED');
+});
+
 test('wallet listing returns metadata for all three public demo wallets', async () => {
   const response = await worker.fetch(new Request('https://api.example/v1/wallets'), env(), {});
   const body = await response.json();

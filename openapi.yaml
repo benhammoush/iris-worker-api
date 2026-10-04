@@ -1,8 +1,15 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 2.5.2
+  version: 2.6.0
 paths:
+  /internal/refresh:
+    post:
+      security: [{ refreshToken: [] }]
+      responses:
+        '200': { description: Snapshot refresh completed. }
+        '401': { description: REFRESH_UNAUTHORIZED }
+        '502': { description: REFRESH_FAILED }
   /health:
     get:
       responses:
@@ -63,3 +70,8 @@ paths:
       responses:
           '200': { description: Cached public wallet balances, totalValue, and grouped activity. Atomic transfer amounts remain strings. portfolioTotal and transactions are compatibility aliases. }
         '404': { description: CURATED_WALLET_NOT_FOUND }
+components:
+  securitySchemes:
+    refreshToken:
+      type: http
+      scheme: bearer

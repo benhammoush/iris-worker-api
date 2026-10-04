@@ -14,7 +14,7 @@ Wallets are fixed public third-party addresses. No wallet API credentials or wal
 
 ## Deployment
 
-Pushes to `main` automatically deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret. Create a least-privilege Cloudflare token that can deploy Workers for the account hosting `iris-api`; its value is never stored in this repository. Until the secret is configured, the deploy job is skipped while validation continues.
+Pushes to `main` automatically deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret. Create a least-privilege Cloudflare token that can deploy Workers for the account hosting `iris-api`; its value is never stored in this repository. Set the same high-entropy `IRIS_REFRESH_TOKEN` GitHub secret as the Worker `REFRESH_TOKEN` secret to invoke the protected `/internal/refresh` endpoint immediately after deployment. Until the required secrets are configured, deployment or immediate refresh is skipped while validation continues.
 
 | Label | Address | Description |
 | --- | --- | --- |
