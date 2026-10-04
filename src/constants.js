@@ -1,4 +1,4 @@
-export const API_VERSION = '2.4.0';
+export const API_VERSION = '2.5.0';
 export const SNAPSHOT_POINTER_KEY = 'snapshot:current';
 export const SNAPSHOT_KEY_PREFIX = 'snapshot:v1:';
 export const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
@@ -9,3 +9,5 @@ export const MAX_SWAPS = 50;
 export const MAX_TRANSACTIONS_PER_WALLET = 25;
 export const MAX_TRANSACTION_SCAN_PER_WALLET = 100;
 export const MAX_DISCOVERED_ASSETS = 40;
+export const MAX_CATALOG_ASSETS = 50;
+export const MAX_GLOBAL_TRANSACTION_SCAN = 100;

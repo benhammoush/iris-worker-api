@@ -29,13 +29,21 @@ export async function route(request, env, config, id, origin) {
   if (url.pathname === '/v1/status') return json({ data: { version: API_VERSION, snapshot: { state, createdAt: snapshot.createdAt, source: snapshot.source }, marketData: { source: snapshot.market.source, asOf: snapshot.market.asOf } }, meta }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v1/market') return json({ data: snapshot.market, meta }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v1/assets') return json({ data: snapshot.assets, meta }, 200, id, origin, snapshotHeaders);
+  if (url.pathname.startsWith('/v1/assets/id/')) {
+    const encodedId = url.pathname.slice('/v1/assets/id/'.length);
+    let contractId;
+    try { contractId = decodeURIComponent(encodedId); } catch { return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin); }
+    const asset = snapshot.assets.find((item) => item.contractId === contractId);
+    return asset ? json({ data: asset, meta }, 200, id, origin, snapshotHeaders) : error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
+  }
   if (url.pathname.startsWith('/v1/assets/')) {
     const assetPath = url.pathname.slice('/v1/assets/'.length);
     if (!assetPath || assetPath.includes('/')) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
     let symbol;
     try { symbol = decodeURIComponent(assetPath).toUpperCase(); } catch { return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin); }
-    const asset = snapshot.assets.find((item) => item.symbol.toUpperCase() === symbol);
-    return asset ? json({ data: asset, meta }, 200, id, origin, snapshotHeaders) : error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
+    const assets = snapshot.assets.filter((item) => item.symbol.toUpperCase() === symbol);
+    if (assets.length > 1) return error('ASSET_SYMBOL_AMBIGUOUS', 'Asset symbol matches multiple contracts. Use the contract identifier.', 409, id, origin);
+    return assets[0] ? json({ data: assets[0], meta }, 200, id, origin, snapshotHeaders) : error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
   }
   if (url.pathname === '/v1/swaps') return json({ data: snapshot.swaps, meta }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v1/wallets') {

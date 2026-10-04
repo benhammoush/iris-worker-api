@@ -76,3 +76,10 @@ test('asset paths reject malformed escapes and nested paths as not found', async
   assert.equal(malformed.status, 404);
   assert.equal(nested.status, 404);
 });
+
+test('asset contract paths use the canonical contract identifier', async () => {
+  const response = await worker.fetch(new Request('https://api.example/v1/assets/id/SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.token-wstx'), env(), {});
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.data.contractId, 'SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.token-wstx');
+});

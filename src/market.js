@@ -58,16 +58,30 @@ export async function refreshMarket(apiKey, discoveredAssets = []) {
   let dexAvailable = true;
   try {
     const addresses = [...new Set([...LIVE_ASSETS.map((asset) => asset.dexAddress), ...discoveredAssets.map((asset) => asset.contractId)])];
-    dexPairs = await fetchJson(`${DEX_SCREENER}/tokens/v1/stacks/${addresses.join(',')}`);
+    const batches = Array.from({ length: Math.ceil(addresses.length / 30) }, (_, index) => addresses.slice(index * 30, index * 30 + 30));
+    dexPairs = (await Promise.all(batches.map((batch) => fetchJson(`${DEX_SCREENER}/tokens/v1/stacks/${batch.join(',')}`)))).flat();
   } catch (cause) {
     dexAvailable = false;
     console.warn('DexScreener refresh unavailable', { message: cause.message });
   }
-  const assets = [...MARKET_SNAPSHOT.assets, ...discoveredAssets]
-    .reduce((unique, asset) => unique.some((item) => item.contractId === asset.contractId) ? unique : [...unique, { ...asset }], []);
+  const assets = [...MARKET_SNAPSHOT.assets, ...discoveredAssets].reduce((unique, asset) => {
+    const existing = unique.get(asset.contractId);
+    unique.set(asset.contractId, existing ? {
+      ...existing,
+      ...asset,
+      imageUrl: asset.imageUrl || existing.imageUrl,
+      price: asset.price ?? existing.price,
+      supply: asset.supply ?? existing.supply,
+      totalSupply: asset.totalSupply ?? existing.totalSupply,
+      marketCap: asset.marketCap ?? existing.marketCap,
+      priceHistory: asset.priceHistory?.length ? asset.priceHistory : existing.priceHistory
+    } : { ...asset });
+    return unique;
+  }, new Map()).values();
+  const assetList = [...assets];
 
   LIVE_ASSETS.forEach((definition, index) => {
-    const asset = assets.find((item) => item.symbol === definition.symbol);
+    const asset = assetList.find((item) => item.symbol === definition.symbol);
     const history = charts[index] ? historyFrom(charts[index]) : [];
     const latest = history.at(-1);
     if (!asset || !latest) return;
@@ -105,7 +119,7 @@ export async function refreshMarket(apiKey, discoveredAssets = []) {
 
   // Wallet-discovered assets are included even without a CoinGecko listing. DexScreener
   // can provide a current price and 24h change, but never a trustworthy 7d history.
-  assets.forEach((asset) => {
+  assetList.forEach((asset) => {
     if (definitionsByContract.has(asset.contractId)) return;
     const pair = bestDexPair(dexPairs, asset.contractId);
     if (!pair) return;
@@ -130,10 +144,10 @@ export async function refreshMarket(apiKey, discoveredAssets = []) {
   });
 
   return {
-    assets,
+    assets: assetList,
     source: dexAvailable ? 'mixed' : 'coingecko',
     asOf: new Date().toISOString(),
-    liveAssetCount: assets.filter((asset) => asset.marketDataSource).length,
+    liveAssetCount: assetList.filter((asset) => asset.marketDataSource).length,
     historySource: 'coingecko'
   };
 }

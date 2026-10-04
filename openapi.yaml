@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 2.4.0
+  version: 2.5.0
 paths:
   /health:
     get:
@@ -23,7 +23,17 @@ paths:
   /v1/assets:
     get:
       responses:
-          '200': { description: Curated assets plus wallet-discovered fungible tokens. Market changes are null when no verified provider history exists. }
+          '200': { description: Tradable Stacks fungible tokens identified by full contract principal. Market changes are null when no verified provider history exists. }
+  /v1/assets/id/{contractId}:
+    get:
+      parameters:
+        - in: path
+          name: contractId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Asset found by its canonical contract principal. }
+        '404': { description: Asset not found }
   /v1/assets/{symbol}:
     get:
       parameters:
@@ -37,7 +47,7 @@ paths:
   /v1/swaps:
     get:
       responses:
-          '200': { description: Verified curated-wallet DEX transaction records. input, output, side, and value are nullable until they can be proven. }
+          '200': { description: Recent chain-wide DEX transaction records from Hiro. input, output, side, and value are nullable until they can be proven. }
   /v1/wallets:
     get:
       description: Returns metadata for the fixed public third-party demo wallet addresses; no wallet credentials are required.

@@ -14,9 +14,15 @@ test('refresh normalizes balances and transactions from the public Hiro endpoint
     json: async () => {
       const value = String(url);
       requests.push(value);
-      if (value.includes('/mempool/fees')) return { estimated_cost: 1 };
-      if (value.endsWith('/v2/info')) return { stacks_tip_height: 123 };
-      if (value.endsWith('/stx_supply')) return { unlocked_stx: 1000000 };
+       if (value.includes('/mempool/fees')) return { estimated_cost: 1 };
+       if (value.endsWith('/v2/info')) return { stacks_tip_height: 123 };
+       if (value.endsWith('/stx_supply')) return { unlocked_stx: 1000000 };
+       if (value.includes('/metadata/v1/ft?')) return { results: [] };
+       if (value.includes('/metadata/v1/ft/')) return { symbol: 'ALEX', name: 'ALEX', decimals: 8, total_supply: '1', contract_principal: 'SP3K8BC0PPEVCV7NZ6QSRWPQ2JE9E5B6N3PA0KBR9.age000-governance-token', image_uri: 'https://images.example/alex.png' };
+       if (value.includes('/extended/v1/tx?')) return { results: Array.from({ length: 60 }, (_, index) => ({
+         tx_id: `chain-${index}`, burn_block_time_iso: `2026-01-01T00:${String(index % 60).padStart(2, '0')}:00.000Z`, block_height: index,
+         tx_type: 'contract_call', tx_status: 'success', contract_call: { contract_id: 'SP123.dex', function_name: 'swap-helper' }
+       })) };
       const wallet = wallets.find(({ address }) => value.includes(address));
       if (value.includes('/balances')) return {
         stx: { balance: '1234567' },
@@ -43,7 +49,8 @@ test('refresh normalizes balances and transactions from the public Hiro endpoint
     const writes = new Map();
     const snapshot = await refreshSnapshot({ SNAPSHOTS: { put: async (key, value) => writes.set(key, value) } }, { wallets }, new Date('2026-10-02T12:00:00.000Z'));
     assert.equal(snapshot.swaps.length, 50);
-    assert.deepEqual(Object.keys(snapshot.swaps[0]), ['id', 'txId', 'wallet', 'timestamp', 'blockHeight', 'contractId', 'functionName', 'status', 'input', 'output', 'side', 'value']);
+    assert.equal(snapshot.swaps[0].wallet, null);
+    assert.deepEqual(Object.keys(snapshot.swaps[0]), ['id', 'txId', 'wallet', 'protocol', 'timestamp', 'blockHeight', 'contractId', 'functionName', 'status', 'input', 'output', 'side', 'value']);
     assert.equal(snapshot.swaps[0].untrusted, undefined);
     const demoA = snapshot.wallets[wallets[0].address];
     assert.equal(demoA.transactions.length, 25);
@@ -60,7 +67,7 @@ test('refresh normalizes balances and transactions from the public Hiro endpoint
     assert.equal(demoA.totalValue, demoA.portfolioTotal);
     assert.ok(requests.every((url) => url.startsWith('https://api.mainnet.hiro.so/')));
     assert.equal(requests.filter((url) => url.includes('/transactions_with_transfers?limit=100&offset=0')).length, 3);
-    assert.equal(requests.some((url) => url.includes('/metadata/')), false);
+    assert.equal(requests.some((url) => url.includes('/metadata/')), true);
     assert.equal(requests.some((url) => url.includes('alexgo.io')), false);
     assert.equal(snapshot.market.history.length, snapshot.assets.length);
     assert.equal(snapshot.market.source, 'snapshot');
