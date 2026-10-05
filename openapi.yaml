@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 3.2.0
+  version: 3.2.1
 paths:
   /internal/refresh:
     post:
@@ -39,7 +39,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
-          '200': { description: Asset found by its canonical mint address, with up to seven daily GeckoTerminal price points when available. History metadata reports fresh, stale, fixture, or unavailable state. }
+          '200': { description: Asset found by its canonical mint address, with up to seven daily CoinGecko price points when available. History metadata reports fresh, stale, fixture, or unavailable state. }
         '404': { description: Asset not found }
   /v2/assets/{symbol}:
     get:

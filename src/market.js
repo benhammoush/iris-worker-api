@@ -2,7 +2,7 @@ import { MAX_CATALOG_ASSETS, SOL_MINT } from './constants.js';
 import { assetIdentity } from './transforms.js';
 
 const JUPITER = 'https://api.jup.ag';
-const GECKOTERMINAL = 'https://api.geckoterminal.com/api/v2';
+const COINGECKO = 'https://api.coingecko.com/api/v3';
 
 async function fetchJson(url, apiKey, provider) {
   const response = await fetch(url, { headers: apiKey ? { 'x-api-key': apiKey } : undefined, signal: AbortSignal.timeout(10_000) });
@@ -81,10 +81,12 @@ export async function refreshMarket(apiKey, candidateMints = null) {
   }
 }
 
-export async function fetchPriceHistory(mint) {
-  const payload = await fetchJson(`${GECKOTERMINAL}/networks/solana/tokens/${encodeURIComponent(mint)}/ohlcv/day?aggregate=1&limit=7&currency=usd`, undefined, 'GeckoTerminal');
-  const candles = payload?.data?.attributes?.ohlcv_list;
-  if (!Array.isArray(candles)) return null;
-  const points = candles.map(([timestamp, _open, _high, _low, close]) => ({ date: new Date(timestamp * 1000).toISOString(), price: close })).filter((point) => Number.isFinite(Date.parse(point.date)) && typeof point.price === 'number').reverse();
+export async function fetchPriceHistory(mint, apiKey) {
+  if (!apiKey) return null;
+  const response = await fetch(`${COINGECKO}/coins/solana/contract/${encodeURIComponent(mint)}/market_chart?vs_currency=usd&days=7&interval=daily`, { headers: { 'x-cg-demo-api-key': apiKey }, signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error(`CoinGecko request failed with ${response.status}`);
+  const payload = await response.json();
+  if (!Array.isArray(payload?.prices)) return null;
+  const points = payload.prices.map(([timestamp, price]) => ({ date: new Date(timestamp).toISOString(), price })).filter((point) => Number.isFinite(Date.parse(point.date)) && typeof point.price === 'number').slice(-7);
   return points.length ? points : null;
 }

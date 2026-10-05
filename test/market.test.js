@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAX_CATALOG_ASSETS, SOL_MINT } from '../src/constants.js';
-import { refreshMarket } from '../src/market.js';
+import { fetchPriceHistory, refreshMarket } from '../src/market.js';
 
 test('market refresh uses Jupiter Tokens V2 fields for the verified ranked catalog', async () => {
   const originalFetch = globalThis.fetch;
@@ -38,4 +38,19 @@ test('market refresh preserves missing provider values as null', async () => {
 
 test('market refresh falls back when no Jupiter key is configured', async () => {
   assert.equal(await refreshMarket(undefined), null);
+});
+
+test('CoinGecko Demo daily prices map to seven price-history points', async () => {
+  const originalFetch = globalThis.fetch;
+  let request;
+  globalThis.fetch = async (url, options) => {
+    request = { url: String(url), options };
+    return { ok: true, json: async () => ({ prices: [[1_760_000_000_000, 150], [1_760_086_400_000, 151]] }) };
+  };
+  try {
+    const points = await fetchPriceHistory(SOL_MINT, 'coingecko-demo-key');
+    assert.match(request.url, /coins\/solana\/contract\/So11111111111111111111111111111111111111112\/market_chart/);
+    assert.equal(request.options.headers['x-cg-demo-api-key'], 'coingecko-demo-key');
+    assert.deepEqual(points.map((point) => point.price), [150, 151]);
+  } finally { globalThis.fetch = originalFetch; }
 });
