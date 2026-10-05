@@ -22,15 +22,33 @@ test('v3 history points use timestamp and priceUsd without changing v2 cache poi
   assert.equal(mapV3HistoryPoints(null), null);
 });
 
-test('v3 history route and embedded detail return canonical points', async () => {
+test('v3 canonical mint routes return range-aware canonical history points', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ prices: [[1_760_000_000_000, 150]] }) });
   try {
-    const history = await worker.fetch(new Request(`https://api.example/v3/assets/${SOL_MINT}/history`), env({ COINGECKO_DEMO_API_KEY: 'key' }), {});
-    const detail = await worker.fetch(new Request(`https://api.example/v3/assets/${SOL_MINT}`), env({ COINGECKO_DEMO_API_KEY: 'key' }), {});
+    const history = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/history?range=1d`), env({ COINGECKO_DEMO_API_KEY: 'key' }), {});
+    const detail = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}`), env({ COINGECKO_DEMO_API_KEY: 'key' }), {});
     const historyPoint = (await history.json()).data.points[0]; const detailPoint = (await detail.json()).data.history.points[0];
     assert.deepEqual(historyPoint, { timestamp: '2025-10-09T08:53:20.000Z', priceUsd: 150 }); assert.deepEqual(detailPoint, historyPoint);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test('v3 resolves a valid mint outside the snapshot through Jupiter', async () => {
+  const mint = 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN';
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => String(url).includes('/tokens/v2/search')
+    ? { ok: true, json: async () => [{ id: mint, symbol: 'JUP', name: 'Jupiter', decimals: 6, isVerified: true, usdPrice: 1 }] }
+    : { ok: true, json: async () => ({ prices: [[1_760_000_000_000, 1]] }) };
+  try {
+    const response = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${mint}`), env({ COINGECKO_DEMO_API_KEY: 'key', JUPITER_API_KEY: 'key' }), {});
+    const body = await response.json();
+    assert.equal(response.status, 200); assert.equal(body.data.mint, mint); assert.equal(body.data.symbol, 'JUP');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('v3 history rejects unsupported ranges', async () => {
+  const response = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/history?range=30d`), env(), {});
+  assert.equal(response.status, 400); assert.equal((await response.json()).error.code, 'INVALID_HISTORY_RANGE');
 });
 
 test('v3 Parsed Events mapping preserves string raw amounts and rejects unsafe numbers', () => {

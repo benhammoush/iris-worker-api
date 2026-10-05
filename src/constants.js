@@ -1,4 +1,4 @@
-export const API_VERSION = '3.3.2';
+export const API_VERSION = '3.4.0';
 export const CHAIN = 'solana';
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const SNAPSHOT_POINTER_KEY = 'snapshot:current';
@@ -15,7 +15,7 @@ export const MAX_TRANSACTIONS_PER_WALLET = 25;
 export const MAX_TRANSACTION_SCAN_PER_WALLET = 100;
 export const MAX_DISCOVERED_ASSETS = 40;
 export const V3_WALLET_CACHE_SECONDS = 60;
-export const MAX_CATALOG_ASSETS = 50;
+export const MAX_CATALOG_ASSETS = 250;
 export const MAX_TRACKED_POOL_TRANSACTIONS = 25;
 export const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 export const TOKEN_2022_PROGRAM_ID = 'TokenzQdYQneH1k9i7gNJYkC7V3Tv1ALb6TrC3CFQeX';

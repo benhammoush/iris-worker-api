@@ -74,7 +74,7 @@ function payloadItems(payload) {
   return Array.isArray(payload) ? payload : payload?.data || [];
 }
 
-async function tokenByMint(mint, apiKey) {
+export async function tokenByMint(mint, apiKey) {
   const items = payloadItems(await fetchJson(`${JUPITER}/tokens/v2/search?query=${encodeURIComponent(mint)}`, apiKey, 'Jupiter'));
   return items.find((item) => (item.id || item.address || item.mint) === mint) || null;
 }
@@ -111,12 +111,14 @@ export async function refreshMarket(apiKey, candidateMints = null) {
   }
 }
 
-export async function fetchPriceHistory(mint, apiKey) {
+export async function fetchPriceHistory(mint, apiKey, range = '7d') {
   if (!apiKey) return null;
-  const response = await fetch(`${COINGECKO}/coins/solana/contract/${encodeURIComponent(mint)}/market_chart?vs_currency=usd&days=7&interval=daily`, { headers: { 'x-cg-demo-api-key': apiKey }, signal: AbortSignal.timeout(10_000) });
+  const days = range === '1d' ? 1 : range === '7d' ? 7 : null;
+  if (!days) throw new Error('Unsupported price-history range.');
+  const response = await fetch(`${COINGECKO}/coins/solana/contract/${encodeURIComponent(mint)}/market_chart?vs_currency=usd&days=${days}`, { headers: { 'x-cg-demo-api-key': apiKey }, signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`CoinGecko request failed with ${response.status}`);
   const payload = await response.json();
   if (!Array.isArray(payload?.prices)) return null;
-  const points = payload.prices.map(([timestamp, price]) => ({ date: new Date(timestamp).toISOString(), price })).filter((point) => Number.isFinite(Date.parse(point.date)) && typeof point.price === 'number').slice(-7);
+  const points = payload.prices.map(([timestamp, price]) => ({ date: new Date(timestamp).toISOString(), price })).filter((point) => Number.isFinite(Date.parse(point.date)) && Number.isFinite(point.price));
   return points.length ? points : null;
 }

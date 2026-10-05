@@ -40,7 +40,7 @@ test('market refresh falls back when no Jupiter key is configured', async () => 
   assert.equal(await refreshMarket(undefined), null);
 });
 
-test('CoinGecko Demo daily prices map to seven price-history points', async () => {
+test('CoinGecko Demo uses range-specific auto-granularity without truncating points', async () => {
   const originalFetch = globalThis.fetch;
   let request;
   globalThis.fetch = async (url, options) => {
@@ -48,8 +48,10 @@ test('CoinGecko Demo daily prices map to seven price-history points', async () =
     return { ok: true, json: async () => ({ prices: [[1_760_000_000_000, 150], [1_760_086_400_000, 151]] }) };
   };
   try {
-    const points = await fetchPriceHistory(SOL_MINT, 'coingecko-demo-key');
+    const points = await fetchPriceHistory(SOL_MINT, 'coingecko-demo-key', '1d');
     assert.match(request.url, /coins\/solana\/contract\/So11111111111111111111111111111111111111112\/market_chart/);
+    assert.match(request.url, /days=1/);
+    assert.doesNotMatch(request.url, /interval=/);
     assert.equal(request.options.headers['x-cg-demo-api-key'], 'coingecko-demo-key');
     assert.deepEqual(points.map((point) => point.price), [150, 151]);
   } finally { globalThis.fetch = originalFetch; }

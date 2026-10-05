@@ -1,6 +1,6 @@
 import { API_VERSION, FRESH_AFTER_MS, HISTORY_KEY_PREFIX, REFRESH_INTERVAL_MINUTES, REFRESH_INTERVAL_MS, STALE_AFTER_MS, V3_HISTORY_KEY_PREFIX } from './constants.js';
 import { error, json } from './http.js';
-import { fetchPriceHistory } from './market.js';
+import { fetchPriceHistory, mapV3Asset, tokenByMint } from './market.js';
 import { isUsableSnapshot, loadWalletData, resolveSnapshot } from './snapshot.js';
 import { isBase58PublicKey } from './transforms.js';
 import { loadV3Events, loadV3Wallet, mapV3HistoryPoints, v3Asset } from './v3.js';
@@ -9,14 +9,14 @@ function usableHistory(history) {
   return history && typeof history === 'object' && Number.isFinite(Date.parse(history.fetchedAt)) && Array.isArray(history.points);
 }
 
-export async function historyForAsset(kv, mint, apiKey, keyPrefix = HISTORY_KEY_PREFIX) {
-  const key = `${keyPrefix}${mint}`;
+export async function historyForAsset(kv, mint, apiKey, keyPrefix = HISTORY_KEY_PREFIX, range = '7d') {
+  const key = `${keyPrefix}${mint}:${range}`;
   const cached = kv ? await kv.get(key, 'json') : null;
   const cachedUsable = usableHistory(cached) || (cached?.unavailable === true && Number.isFinite(Date.parse(cached.fetchedAt)));
   const age = cachedUsable ? Date.now() - Date.parse(cached.fetchedAt) : Infinity;
   if (age >= 0 && age <= FRESH_AFTER_MS) return { points: cached.unavailable ? null : cached.points, state: cached.unavailable ? 'unavailable' : 'fresh', fetchedAt: cached.fetchedAt };
   try {
-    const points = await fetchPriceHistory(mint, apiKey);
+    const points = await fetchPriceHistory(mint, apiKey, range);
     if (!points) {
       if (age >= 0 && age <= STALE_AFTER_MS && usableHistory(cached)) return { points: cached.points, state: 'stale', fetchedAt: cached.fetchedAt };
       const fetchedAt = new Date().toISOString();
@@ -67,18 +67,30 @@ export async function route(request, env, config, id, origin) {
   if (url.pathname === '/v3/status') return json({ data: { version: API_VERSION, chain: 'solana', provenance: { snapshot: snapshot.source, market: snapshot.market.source, reviewedSwaps: snapshot.market.swaps?.source ?? 'unknown' }, freshness: { snapshot: state, snapshotCreatedAt: snapshot.createdAt, marketDataAsOf: snapshot.market.asOf }, reviewedSwaps: { scope: snapshot.market.swaps?.scope ?? 'registered-liquid-pools', count: snapshot.market.swaps?.count ?? snapshot.swaps.length } }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v3/assets') return json({ data: snapshot.assets.map(v3Asset), meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v3/swaps') return json({ data: { scope: snapshot.market.swaps?.scope ?? 'registered-liquid-pools', swaps: snapshot.swaps.map(v3Swap) }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
-  if (url.pathname.startsWith('/v3/assets/')) {
-    const suffix = url.pathname.slice('/v3/assets/'.length);
+  if (url.pathname.startsWith('/v3/assets/mint/')) {
+    const suffix = url.pathname.slice('/v3/assets/mint/'.length);
     const historySuffix = suffix.endsWith('/history');
     const encodedMint = historySuffix ? suffix.slice(0, -'/history'.length) : suffix;
     let mint;
     try { mint = decodeURIComponent(encodedMint); } catch { return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin); }
     if (!mint || mint.includes('/') || !isBase58PublicKey(mint)) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
-    const asset = snapshot.assets.find((item) => item.mint === mint);
-    if (!asset) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
-    const history = await historyForAsset(env.SNAPSHOTS, mint, config.coingeckoApiKey, V3_HISTORY_KEY_PREFIX);
+    if (!encodedMint || encodedMint.includes('/')) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
+    let asset = snapshot.assets.find((item) => item.mint === mint);
+    if (!asset) {
+      try {
+        const token = await tokenByMint(mint, config.jupiterApiKey || env.JUPITER_API_KEY);
+        if (!token) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
+        asset = { v3: mapV3Asset(token) };
+      } catch (cause) {
+        console.warn('Jupiter asset lookup unavailable', { mint, message: cause.message });
+        return error('ASSET_LOOKUP_UNAVAILABLE', 'Asset data is currently unavailable.', 503, id, origin);
+      }
+    }
+    const range = url.searchParams.get('range') || '7d';
+    if (range !== '1d' && range !== '7d') return error('INVALID_HISTORY_RANGE', 'range must be 1d or 7d.', 400, id, origin);
+    const history = await historyForAsset(env.SNAPSHOTS, mint, config.coingeckoApiKey, V3_HISTORY_KEY_PREFIX, range);
     const points = mapV3HistoryPoints(history.points);
-    if (historySuffix) return json({ data: { mint, points }, meta: v3Meta(meta, history) }, 200, id, origin, snapshotHeaders);
+    if (historySuffix) return json({ data: { mint, range, points }, meta: v3Meta(meta, history) }, 200, id, origin, snapshotHeaders);
     return json({ data: { ...v3Asset(asset), history: { points, state: state === 'fixture' ? 'fixture' : history.state, fetchedAt: history.fetchedAt } }, meta: v3Meta(meta, history) }, 200, id, origin, snapshotHeaders);
   }
   if (url.pathname.startsWith('/v3/wallets/')) {

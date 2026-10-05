@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 3.3.2
+  version: 3.4.0
 paths:
   /internal/refresh:
     post:
@@ -79,17 +79,19 @@ paths:
     get:
       responses:
         '200': { description: Canonical Jupiter Tokens V2 assets, content: { application/json: { schema: { $ref: '#/components/schemas/AssetEnvelope' } } } }
-  /v3/assets/{mint}:
+  /v3/assets/mint/{mint}:
     get:
       parameters: [{ in: path, name: mint, required: true, schema: { type: string } }]
       responses:
-        '200': { description: Canonical asset with seven-day history state, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+        '200': { description: Canonical asset, including seven-day history state by default. Valid Solana mints outside the catalog are resolved on demand through Jupiter., content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
         '404': { description: ASSET_NOT_FOUND, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
-  /v3/assets/{mint}/history:
+  /v3/assets/mint/{mint}/history:
     get:
-      parameters: [{ in: path, name: mint, required: true, schema: { type: string } }]
+      parameters:
+        - { in: path, name: mint, required: true, schema: { type: string } }
+        - { in: query, name: range, schema: { type: string, enum: [1d, 7d], default: 7d } }
       responses:
-        '200': { description: Seven daily canonical { timestamp, priceUsd } CoinGecko points or null when unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/HistoryEnvelope' } } } }
+        '200': { description: Canonical CoinGecko price points or null when unavailable. One day uses provider auto-granularity (typically five minutes); seven days typically returns hourly points., content: { application/json: { schema: { $ref: '#/components/schemas/HistoryEnvelope' } } } }
   /v3/wallets/{address}:
     get:
       parameters: [{ in: path, name: address, required: true, schema: { type: string } }]
