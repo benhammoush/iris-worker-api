@@ -4,7 +4,7 @@ import worker from '../src/index.js';
 import { SOL_MINT } from '../src/constants.js';
 import { mapV3Asset } from '../src/market.js';
 import { historyForAsset } from '../src/routes.js';
-import { mapDasWallet, mapV3Event, mapV3HistoryPoints } from '../src/v3.js';
+import { loadV3Wallet, mapDasWallet, mapV3Event, mapV3HistoryPoints } from '../src/v3.js';
 
 function env(overrides = {}) { return { CORS_ORIGINS: 'https://app.example', SNAPSHOTS: { get: async () => null, put: async () => {} }, ...overrides }; }
 
@@ -64,6 +64,29 @@ test('DAS wallet mapping preserves atomic balances, caps holdings, and reports p
   const wallet = mapDasWallet('11111111111111111111111111111111', result, [{ mint: SOL_MINT, symbol: 'SOL', name: 'Solana', decimals: 9, iconUrl: null, priceUsd: 100 }, { mint: 'Mint0', symbol: 'M0', name: 'M0', decimals: 6, iconUrl: null, priceUsd: 2 }]);
   assert.equal(wallet.balances.length, 40); assert.equal(wallet.holdingsTruncated, true); assert.equal(wallet.balances[0].atomicAmount, '1000000000');
   assert.equal(wallet.balancesTruncated, undefined); assert.equal(wallet.valuation.pricedSubtotalUsd, 105); assert.equal(wallet.valuation.pricedHoldingCount, 2); assert.equal(wallet.valuation.unpricedHoldingCount, 38); assert.equal(wallet.valuation.complete, false);
+});
+
+test('v3 wallet returns DAS balances as unpriced when Jupiter enrichment rejects', async () => {
+  const originalFetch = globalThis.fetch; const originalWarn = console.warn;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ result: { nativeBalance: { lamports: '1000000000' }, items: [{ id: 'Mint1', token_info: { balance: '2500000', decimals: 6 } }] } }) });
+  console.warn = () => {};
+  try {
+    const wallet = (await loadV3Wallet(env({ HELIUS_API_KEY: 'h', JUPITER_API_KEY: 'j' }), {}, SOL_MINT, async () => { throw new Error('Jupiter unavailable'); })).wallet;
+    assert.deepEqual(wallet.balances, [
+      { mint: SOL_MINT, symbol: null, name: null, decimals: 9, iconUrl: null, atomicAmount: '1000000000', amount: '1', priceUsd: null, valueUsd: null },
+      { mint: 'Mint1', symbol: null, name: null, decimals: 6, iconUrl: null, atomicAmount: '2500000', amount: '2.5', priceUsd: null, valueUsd: null }
+    ]);
+    assert.deepEqual(wallet.valuation, { pricedSubtotalUsd: 0, holdingCount: 2, pricedHoldingCount: 0, unpricedHoldingCount: 2, complete: false });
+  } finally { globalThis.fetch = originalFetch; console.warn = originalWarn; }
+});
+
+test('v3 wallet propagates DAS failures before attempting Jupiter enrichment', async () => {
+  const originalFetch = globalThis.fetch; let jupiterRequested = false;
+  globalThis.fetch = async () => ({ ok: false, status: 503 });
+  try {
+    await assert.rejects(loadV3Wallet(env({ HELIUS_API_KEY: 'h', JUPITER_API_KEY: 'j' }), {}, SOL_MINT, async () => { jupiterRequested = true; }), /Helius RPC request failed with 503/);
+    assert.equal(jupiterRequested, false);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test('v3 wallet cache, transaction pagination defaults, CORS, and v2 compatibility', async () => {

@@ -82,7 +82,7 @@ export function mapDasWallet(address, result, marketAssets) {
   return { address, balances, holdingsTruncated: holdings.length > 40 || balancesTruncated, valuation: { pricedSubtotalUsd, holdingCount: balances.length, pricedHoldingCount, unpricedHoldingCount, complete: !balancesTruncated && !unpricedHoldingCount } };
 }
 
-export async function loadV3Wallet(env, config, address) {
+export async function loadV3Wallet(env, config, address, marketRefresh = refreshMarket) {
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
   if (!apiKey) { const cause = new Error('Helius is not configured.'); cause.code = 'WALLET_LOOKUP_UNAVAILABLE'; throw cause; }
   const key = `${V3_WALLET_KEY_PREFIX}${address}`;
@@ -91,7 +91,12 @@ export async function loadV3Wallet(env, config, address) {
   const result = await heliusRpc('getAssetsByOwner', [{ ownerAddress: address, page: 1, limit: 100, displayOptions: { showFungible: true, showNativeBalance: true, showGrandTotal: true } }], apiKey);
   const mints = (Array.isArray(result?.items) ? result.items : []).map((item) => item?.id).filter((mint) => typeof mint === 'string').slice(0, 40);
   if (!mints.includes(SOL_MINT)) mints.unshift(SOL_MINT);
-  const market = await refreshMarket(config.jupiterApiKey || env.JUPITER_API_KEY, mints.slice(0, 40));
+  let market = null;
+  try {
+    market = await marketRefresh(config.jupiterApiKey || env.JUPITER_API_KEY, mints.slice(0, 40));
+  } catch (cause) {
+    console.warn('Jupiter wallet enrichment unavailable', { message: cause?.message });
+  }
   const wallet = mapDasWallet(address, result, (market?.assets || []).map(v3Asset));
   const asOf = new Date().toISOString();
   if (env.SNAPSHOTS?.put) await env.SNAPSHOTS.put(key, JSON.stringify({ wallet, asOf }), { expirationTtl: V3_WALLET_CACHE_SECONDS });
