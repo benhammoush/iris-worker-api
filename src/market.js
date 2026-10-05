@@ -36,7 +36,37 @@ function tokenAsset(token) {
     actualprice: typeof token.usdPrice === 'number' ? token.usdPrice : null, image: token.icon || token.logoURI || '',
     marketcap: token.mcap ?? null, pricedayminusone: null, percentdayminusone: token.stats24h?.priceChange ?? token.priceChange24h ?? null,
     priceweekminusone: null, percentweekminusone: null, pricemonthminusone: null, percentmonthminusone: null,
-    contractname: mint, metadataSource: 'jupiter', marketDataSource: 'jupiter', historyDataSource: null
+    contractname: mint, metadataSource: 'jupiter', marketDataSource: 'jupiter', historyDataSource: null,
+    v3: mapV3Asset(token)
+  };
+}
+
+function finiteOrNull(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+export function mapV3Asset(token) {
+  const mint = token?.id || token?.mint || null;
+  const stats = token?.stats24h || {};
+  const buyVolume24hUsd = finiteOrNull(stats.buyVolume ?? token?.buyVolume24hUsd);
+  const sellVolume24hUsd = finiteOrNull(stats.sellVolume ?? token?.sellVolume24hUsd);
+  return {
+    mint,
+    symbol: typeof token?.symbol === 'string' ? token.symbol : null,
+    name: typeof token?.name === 'string' ? token.name : null,
+    decimals: Number.isInteger(token?.decimals) && token.decimals >= 0 ? token.decimals : null,
+    iconUrl: typeof (token?.iconUrl ?? token?.icon) === 'string' ? (token.iconUrl ?? token.icon) : null,
+    priceUsd: finiteOrNull(token?.usdPrice),
+    marketCapUsd: finiteOrNull(token?.mcap),
+    circulatingSupply: finiteOrNull(token?.circSupply),
+    totalSupply: finiteOrNull(token?.totalSupply),
+    fullyDilutedValuationUsd: finiteOrNull(token?.fdv),
+    change24hPct: finiteOrNull(stats.priceChange ?? token?.priceChange24h),
+    liquidityUsd: finiteOrNull(token?.liquidity),
+    holderCount: finiteOrNull(token?.holderCount),
+    verification: { isVerified: token?.isVerified === true, tags: Array.isArray(token?.tags) ? token.tags.filter((tag) => typeof tag === 'string') : [] },
+    quality: { organicScore: finiteOrNull(token?.organicScore), organicScoreLabel: typeof token?.organicScoreLabel === 'string' ? token.organicScoreLabel : null, audit: token?.audit && typeof token.audit === 'object' ? token.audit : null },
+    activity: { buyVolume24hUsd, sellVolume24hUsd, volume24hUsd: buyVolume24hUsd !== null && sellVolume24hUsd !== null ? buyVolume24hUsd + sellVolume24hUsd : null }
   };
 }
 

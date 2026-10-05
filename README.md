@@ -24,8 +24,16 @@ With `HELIUS_API_KEY`, `JUPITER_API_KEY`, and `COINGECKO_DEMO_API_KEY` configure
 
 Responses are JSON envelopes with `meta.requestId`; errors use `error.code`. Snapshot responses include `snapshotCreatedAt`, `refreshIntervalMinutes`, and `nextScheduledRefreshAt` (the next UTC cron boundary), plus `X-Snapshot-State`, and are `Cache-Control: no-store`. The resolver serves fresh data for up to 30 minutes, stale data for more than 30 minutes through 24 hours, then the bundled fixture snapshot.
 
+## API versions
+
+`/v3` is the canonical contract. It exposes Jupiter Tokens V2 fields without v2 aliases, CoinGecko history as canonical `{ timestamp, priceUsd }` daily points, registry-scoped reviewed swaps, and DAS wallet balances. Wallet responses contain `balances`, `holdingsTruncated`, and `valuation` with a finite-priced subtotal and coverage counts. They are cached in KV for 60 seconds; `meta.wallet` reports cache freshness and its `asOf` timestamp. Atomic quantities remain strings and enriched holdings are capped at 40. `/v3/wallets/:address/transactions` calls Helius Parsed Events transaction history with `limit=25` by default, `limit=100` maximum, and its opaque `paginationToken` exposed as `cursor`/`nextCursor`. Events expose `transfers.native` and `transfers.tokens`; digit-string atomic values are retained unchanged and unsafe provider numbers are null rather than precision-loss conversions. The previous `/events` spelling remains a transitional alias only. History is fresh for 30 minutes and may be served stale for 24 hours; unavailable CoinGecko lookups are negatively cached.
+
+`/v2` and transitional `/v1` routes retain their existing response shapes during migration. Clients should move to `/v3`; v3 has no symbol or legacy identifier aliases.
+
 ## Endpoints
 
 `GET /health`, `GET /ready`, `GET /v2/status`, `GET /v2/market`, `GET /v2/assets`, `GET /v2/assets/mint/:mint`, `GET /v2/assets/:symbol`, `GET /v2/swaps`, `GET /v2/wallets`, and `GET /v2/wallets/:address`. The previous `/v1` routes remain transitional aliases.
 
 `/v2/wallets` has no featured-address list. `/v2/wallets/:address` accepts any valid public Solana address and returns live Helius balances, `totalValue`, and decoded activity; atomic quantities remain strings. `/v2/swaps` reads decoded activity only for the reviewed pool registry and is explicitly not chain-wide. `/v2/status` reports swap scope and count. Asset detail lookup uses `/v2/assets/mint/:mint`; symbol lookup remains only for unique symbols. See `openapi.yaml` for the API contract. Browser CORS is limited to comma-separated `CORS_ORIGINS` values.
+
+Canonical v3 routes are `GET /v3/status`, `GET /v3/assets`, `GET /v3/assets/:mint`, `GET /v3/assets/:mint/history`, `GET /v3/swaps`, `GET /v3/wallets/:address`, and `GET /v3/wallets/:address/transactions`.

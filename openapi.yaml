@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 3.2.1
+  version: 3.3.0
 paths:
   /internal/refresh:
     post:
@@ -70,8 +70,169 @@ paths:
       responses:
           '200': { description: Live SOL/SPL/Token-2022 public balances, totalValue, and decoded activity. Atomic amounts remain strings. }
           '400': { description: INVALID_WALLET_ADDRESS }
-          '503': { description: WALLET_LOOKUP_UNAVAILABLE }
+           '503': { description: WALLET_LOOKUP_UNAVAILABLE }
+  /v3/status:
+    get:
+      responses:
+        '200': { description: Canonical provenance, freshness, and reviewed-pool swap scope, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+  /v3/assets:
+    get:
+      responses:
+        '200': { description: Canonical Jupiter Tokens V2 assets, content: { application/json: { schema: { $ref: '#/components/schemas/AssetEnvelope' } } } }
+  /v3/assets/{mint}:
+    get:
+      parameters: [{ in: path, name: mint, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Canonical asset with seven-day history state, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+        '404': { description: ASSET_NOT_FOUND, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
+  /v3/assets/{mint}/history:
+    get:
+      parameters: [{ in: path, name: mint, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: Seven daily canonical { timestamp, priceUsd } CoinGecko points or null when unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/HistoryEnvelope' } } } }
+  /v3/wallets/{address}:
+    get:
+      parameters: [{ in: path, name: address, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: DAS fungible and native balances, capped at 40 enriched holdings. Meta reports Helius DAS cache freshness and as-of timestamp., content: { application/json: { schema: { $ref: '#/components/schemas/WalletEnvelope' } } } }
+        '400': { description: INVALID_WALLET_ADDRESS, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
+        '503': { description: WALLET_LOOKUP_UNAVAILABLE, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
+  /v3/wallets/{address}/transactions:
+    get:
+      parameters:
+        - { in: path, name: address, required: true, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, default: 25, maximum: 100 } }
+        - { in: query, name: cursor, schema: { type: string } }
+      responses:
+        '200': { description: Helius Parsed Events transaction-history page. cursor is the opaque paginationToken returned as nextCursor. The transitional /events alias is intentionally not part of the canonical contract., content: { application/json: { schema: { $ref: '#/components/schemas/TransactionsEnvelope' } } } }
+  /v3/swaps:
+    get:
+      responses:
+        '200': { description: Canonical reviewed-pool registry-scoped swaps only, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
 components:
+  schemas:
+    Envelope:
+      type: object
+      required: [data, meta]
+      properties: { data: {}, meta: { type: object, required: [requestId], properties: { requestId: { type: string } } } }
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties: { error: { type: object, required: [code, message, requestId], properties: { code: { type: string }, message: { type: string }, requestId: { type: string } } } }
+    Asset:
+      type: object
+      required: [mint, symbol, name, decimals, iconUrl, priceUsd, marketCapUsd, circulatingSupply, totalSupply, fullyDilutedValuationUsd, change24hPct, liquidityUsd, holderCount, verification, quality, activity]
+      properties:
+        mint: { type: [string, 'null'] }
+        symbol: { type: [string, 'null'] }
+        name: { type: [string, 'null'] }
+        decimals: { type: [integer, 'null'] }
+        iconUrl: { type: [string, 'null'] }
+        priceUsd: { type: [number, 'null'] }
+        marketCapUsd: { type: [number, 'null'] }
+        circulatingSupply: { type: [number, 'null'] }
+        totalSupply: { type: [number, 'null'] }
+        fullyDilutedValuationUsd: { type: [number, 'null'] }
+        change24hPct: { type: [number, 'null'] }
+        liquidityUsd: { type: [number, 'null'] }
+        holderCount: { type: [number, 'null'] }
+        verification: { type: object }
+        quality: { type: object }
+        activity: { type: object }
+    AssetEnvelope:
+      allOf: [{ $ref: '#/components/schemas/Envelope' }]
+    HistoryEnvelope:
+      allOf:
+        - { $ref: '#/components/schemas/Envelope' }
+        - type: object
+          properties: { data: { type: object, properties: { mint: { type: string }, points: { type: [array, 'null'], items: { $ref: '#/components/schemas/HistoryPoint' } } } } }
+    HistoryPoint:
+      type: object
+      required: [timestamp, priceUsd]
+      properties:
+        timestamp: { type: string, format: date-time }
+        priceUsd: { type: number }
+    WalletEnvelope:
+      allOf:
+        - { $ref: '#/components/schemas/Envelope' }
+        - type: object
+          properties: { data: { $ref: '#/components/schemas/Wallet' } }
+    TransactionsEnvelope:
+      allOf:
+        - { $ref: '#/components/schemas/Envelope' }
+        - type: object
+          properties: { data: { $ref: '#/components/schemas/TransactionsPage' } }
+    Wallet:
+      type: object
+      required: [address, balances, holdingsTruncated, valuation]
+      properties:
+        address: { type: string }
+        balances: { type: array, items: { $ref: '#/components/schemas/WalletBalance' } }
+        holdingsTruncated: { type: boolean }
+        valuation: { $ref: '#/components/schemas/Valuation' }
+    WalletBalance:
+      type: object
+      required: [mint, decimals, atomicAmount, amount, priceUsd, valueUsd]
+      properties:
+        mint: { type: string }
+        decimals: { type: [integer, 'null'] }
+        atomicAmount: { type: string, description: Base-unit amount; never a JSON number. }
+        amount: { type: [string, 'null'] }
+        priceUsd: { type: [number, 'null'] }
+        valueUsd: { type: [number, 'null'] }
+    Valuation:
+      type: object
+      required: [pricedSubtotalUsd, holdingCount, pricedHoldingCount, unpricedHoldingCount, complete]
+      properties:
+        pricedSubtotalUsd: { type: number }
+        holdingCount: { type: integer }
+        pricedHoldingCount: { type: integer }
+        unpricedHoldingCount: { type: integer }
+        complete: { type: boolean }
+    TransactionsPage:
+      type: object
+      required: [events, nextCursor]
+      properties:
+        events: { type: array, items: { $ref: '#/components/schemas/TransactionEvent' } }
+        nextCursor: { type: [string, 'null'], description: Opaque Helius paginationToken. }
+    TransactionEvent:
+      type: object
+      required: [id, timestamp, type, source, status, summary, description, transfers]
+      properties:
+        id: { type: [string, 'null'] }
+        timestamp: { type: [string, 'null'], format: date-time }
+        type: { type: [string, 'null'] }
+        source: { type: [string, 'null'] }
+        status: { type: string, enum: [success, failed] }
+        summary: { type: [string, 'null'] }
+        description: { type: [string, 'null'] }
+        transfers: { $ref: '#/components/schemas/TransferGroups' }
+    TransferGroups:
+      type: object
+      required: [native, tokens]
+      description: Native SOL and SPL/Token-2022 transfer groups.
+      properties:
+        native: { type: array, items: { $ref: '#/components/schemas/NativeTransfer' } }
+        tokens: { type: array, items: { $ref: '#/components/schemas/TokenTransfer' } }
+    NativeTransfer:
+      type: object
+      required: [from, to, atomicAmount]
+      properties:
+        from: { type: [string, 'null'] }
+        to: { type: [string, 'null'] }
+        atomicAmount: { type: [string, 'null'], description: Lamports as a digit string; null when the provider supplied an unsafe JSON number. }
+    TokenTransfer:
+      type: object
+      required: [mint, from, to, fromTokenAccount, toTokenAccount, atomicAmount, decimals, tokenStandard]
+      properties:
+        mint: { type: [string, 'null'] }
+        from: { type: [string, 'null'] }
+        to: { type: [string, 'null'] }
+        fromTokenAccount: { type: [string, 'null'] }
+        toTokenAccount: { type: [string, 'null'] }
+        atomicAmount: { type: [string, 'null'], description: Base-unit amount as a digit string; null when the provider supplied an unsafe JSON number. }
+        decimals: { type: [integer, 'null'] }
+        tokenStandard: { type: [string, 'null'] }
   securitySchemes:
     refreshToken:
       type: http

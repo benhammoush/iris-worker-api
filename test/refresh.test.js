@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadWalletData, refreshSnapshot } from '../src/snapshot.js';
 import { SOL_MINT } from '../src/constants.js';
+import { FIXTURE_SNAPSHOT } from '../src/fixtures.js';
 
 const wallet = { address: '11111111111111111111111111111111', label: 'Demo', description: 'Test wallet' };
 const usdc = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -38,4 +39,23 @@ test('refresh does not publish a new fixture when Helius is not configured', asy
   assert.equal(snapshot.source, 'fixture');
   assert.equal(snapshot.assets[0].mint, SOL_MINT);
   assert.equal(writes.size, 0);
+});
+
+test('refresh preserves reviewed swaps when a tracked Helius pool refresh fails', async () => {
+  const previous = { ...FIXTURE_SNAPSHOT, createdAt: '2026-10-02T12:00:00.000Z', source: 'helius-jupiter', market: { ...FIXTURE_SNAPSHOT.market, asOf: '2026-10-02T12:00:00.000Z' }, swaps: [{ id: 'previous-swap' }] };
+  const writes = new Map();
+  const snapshots = { get: async (key) => key === 'snapshot:current' ? { key: 'snapshot:previous' } : previous, put: async (key, value) => writes.set(key, value) };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    const value = String(url);
+    if (value.includes('/addresses/')) throw new Error('Helius unavailable');
+    if (value.includes('helius-rpc')) return { ok: true, json: async () => ({ result: 123 }) };
+    if (value.includes('/toptraded/')) return { ok: true, json: async () => [{ id: SOL_MINT, symbol: 'SOL', name: 'Solana', decimals: 9, isVerified: true }] };
+    if (value.includes('/search?')) return { ok: true, json: async () => [] };
+    return { ok: true, json: async () => [] };
+  };
+  try {
+    const refreshed = await refreshSnapshot({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'helius', JUPITER_API_KEY: 'jupiter' }, { heliusApiKey: 'helius', jupiterApiKey: 'jupiter' }, new Date('2026-10-02T12:01:00.000Z'));
+    assert.deepEqual(refreshed.swaps, previous.swaps); assert.equal(writes.size, 2);
+  } finally { globalThis.fetch = originalFetch; }
 });

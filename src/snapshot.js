@@ -93,12 +93,15 @@ async function fetchTrackedPoolSwaps(apiKey) {
   const routes = registeredDexRoutes();
   const results = await Promise.allSettled(routes.flatMap((route) => route.pools.map((pool) => heliusEnhanced(`/addresses/${pool}/transactions?limit=${MAX_TRACKED_POOL_TRANSACTIONS}`, apiKey))));
   const bySignature = new Map();
+  let succeeded = 0;
   for (const result of results) {
     if (result.status !== 'fulfilled') continue;
+    succeeded += 1;
     for (const transaction of result.value) {
       if (isRegisteredDexSwap(transaction) && transaction.signature) bySignature.set(transaction.signature, transaction);
     }
   }
+  if (succeeded !== results.length) throw new Error('A tracked pool refresh failed.');
   return [...bySignature.values()].map((transaction) => normalizeSwap(null, transaction));
 }
 
@@ -144,7 +147,7 @@ export async function refreshSnapshot(env, config, now = new Date()) {
   const existing = await resolveSnapshot(env.SNAPSHOTS, now.getTime());
   if (!apiKey) return existing.state === 'fixture' ? FIXTURE_SNAPSHOT : existing.snapshot;
   const [trackedPoolResult, slotResult] = await Promise.all([
-    fetchTrackedPoolSwaps(apiKey).catch((cause) => { console.warn('Tracked pool swaps unavailable', { message: cause.message }); return []; }),
+    fetchTrackedPoolSwaps(apiKey).catch((cause) => { console.warn('Tracked pool swaps unavailable', { message: cause.message }); return existing.state === 'fixture' ? [] : existing.snapshot.swaps; }),
     heliusRpc('getSlot', [{ commitment: 'finalized' }], apiKey).catch(() => null)
   ]);
   const market = await refreshMarket(config.jupiterApiKey || env.JUPITER_API_KEY);

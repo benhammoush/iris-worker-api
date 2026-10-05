@@ -16,7 +16,7 @@ export default {
     const origin = allowedOrigin(request, config);
     if (request.headers.get('origin') && !origin) return error('CORS_ORIGIN_DENIED', 'Origin is not allowed.', 403, id);
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'GET, OPTIONS', 'access-control-allow-headers': 'content-type, x-request-id', 'access-control-max-age': '86400', 'x-request-id': id } });
+      return new Response(null, { status: 204, headers: { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-request-id, authorization', 'access-control-max-age': '86400', 'x-request-id': id } });
     }
     if (request.method === 'POST' && new URL(request.url).pathname === '/internal/refresh') {
       const expectedToken = env.REFRESH_TOKEN;
