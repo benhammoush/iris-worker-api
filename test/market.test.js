@@ -47,7 +47,7 @@ test('discovery catalogs use Jupiter Trending and Recent endpoints', async () =>
     const value = String(url); requests.push(value);
     const token = value.includes('/toptrending/')
       ? { id: 'Trend1111111111111111111111111111111111111', symbol: 'TREND', isVerified: false }
-      : [{ id: 'LowRecent1111111111111111111111111111111111', symbol: 'LOW', isVerified: false, stats24h: { buyVolume: 4_000, sellVolume: 5_999 } }, { id: 'Recent111111111111111111111111111111111111', symbol: 'RECENT', isVerified: false, stats24h: { buyVolume: 4_000, sellVolume: 6_000 } }];
+      : [{ id: 'LowRecent1111111111111111111111111111111111', symbol: 'LOW', isVerified: false, stats24h: { buyVolume: 40, sellVolume: 59 } }, { id: 'Recent111111111111111111111111111111111111', symbol: 'RECENT', isVerified: false, stats24h: { buyVolume: 40, sellVolume: 60 } }];
     return { ok: true, json: async () => Array.isArray(token) ? token : [token] };
   };
   try {
