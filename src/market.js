@@ -79,11 +79,11 @@ export async function tokenByMint(mint, apiKey) {
   return items.find((item) => (item.id || item.address || item.mint) === mint) || null;
 }
 
-function catalogTokens(tokens) {
+function catalogTokens(tokens, verifiedOnly = true) {
   const byMint = new Map();
   for (const token of tokens) {
     const mint = token?.id || token?.address || token?.mint;
-    if (!mint || (!token.isVerified && mint !== SOL_MINT) || byMint.has(mint)) continue;
+    if (!mint || (verifiedOnly && !token.isVerified && mint !== SOL_MINT) || byMint.has(mint)) continue;
     byMint.set(mint, token);
   }
   return [...byMint.values()].slice(0, MAX_CATALOG_ASSETS);
@@ -114,7 +114,7 @@ export async function refreshMarket(apiKey, candidateMints = null) {
 async function refreshDiscoveryCatalog(apiKey, path) {
   try {
     const tokens = payloadItems(await fetchJson(`${JUPITER}/tokens/v2/${path}`, apiKey, 'Jupiter'));
-    return catalogTokens(tokens).slice(0, MAX_DISCOVERY_CATALOG_ASSETS).map(tokenAsset).filter(Boolean);
+    return catalogTokens(tokens, false).slice(0, MAX_DISCOVERY_CATALOG_ASSETS).map(tokenAsset).filter(Boolean);
   } catch (cause) {
     console.warn('Jupiter discovery catalog unavailable', { path, message: cause.message });
     return [];

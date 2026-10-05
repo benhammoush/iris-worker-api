@@ -46,14 +46,15 @@ test('discovery catalogs use Jupiter Trending and Recent endpoints', async () =>
   globalThis.fetch = async (url) => {
     const value = String(url); requests.push(value);
     const token = value.includes('/toptrending/')
-      ? { id: 'Trend1111111111111111111111111111111111111', symbol: 'TREND', isVerified: true }
-      : { id: 'Recent111111111111111111111111111111111111', symbol: 'RECENT', isVerified: true };
+      ? { id: 'Trend1111111111111111111111111111111111111', symbol: 'TREND', isVerified: false }
+      : { id: 'Recent111111111111111111111111111111111111', symbol: 'RECENT', isVerified: false };
     return { ok: true, json: async () => [token] };
   };
   try {
     const catalogs = await refreshDiscoveryCatalogs('jupiter-key');
     assert.equal(catalogs.trending[0].symbol, 'TREND');
     assert.equal(catalogs.recent[0].symbol, 'RECENT');
+    assert.equal(catalogs.trending[0].v3.verification.isVerified, false);
     assert.ok(requests.some((url) => url.includes('/toptrending/24h?limit=10')));
     assert.ok(requests.some((url) => url.endsWith('/recent')));
   } finally { globalThis.fetch = originalFetch; }
