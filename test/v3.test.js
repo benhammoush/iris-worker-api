@@ -111,7 +111,7 @@ test('v3 wallet cache, transaction pagination defaults, CORS, and v2 compatibili
     assert.equal(transactionBody.data.nextCursor, '433950192:0'); assert.equal(transactionBody.data.events[0].summary, 'Transferred SOL'); assert.equal(transactionBody.data.events[0].transfers.native[0].atomicAmount, '9007199254740993'); assert.equal(transactionBody.data.events[0].transfers.tokens[0].decimals, 6);
     assert.match(parsedRequest.value, /^https:\/\/mainnet\.helius-rpc\.com\/v1\/parsed-events\/transaction-history\?api-key=h$/); assert.equal(parsedRequest.options.method, 'POST'); assert.deepEqual(JSON.parse(parsedRequest.options.body), { address: SOL_MINT, limit: 25, sortOrder: 'desc', commitment: 'confirmed' });
     const dasRequest = requests.find((request) => request.value.includes('mainnet.helius-rpc.com') && request.options.body && JSON.parse(request.options.body).method === 'getAssetsByOwner');
-    assert.equal(JSON.parse(dasRequest.options.body).params[0].displayOptions.showNativeBalance, true);
+    assert.deepEqual(JSON.parse(dasRequest.options.body).params, { ownerAddress: SOL_MINT, page: 1, limit: 100, displayOptions: { showFungible: true, showNativeBalance: true, showGrandTotal: true } });
     const eventsAlias = await worker.fetch(new Request(`https://api.example/v3/wallets/${SOL_MINT}/events?cursor=433950192%3A0`), env({ HELIUS_API_KEY: 'h' }), {});
     assert.equal(eventsAlias.status, 200);
     const cursorRequest = requests.filter((request) => request.value.includes('/v1/parsed-events/transaction-history')).at(-1);

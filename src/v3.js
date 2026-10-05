@@ -88,7 +88,7 @@ export async function loadV3Wallet(env, config, address, marketRefresh = refresh
   const key = `${V3_WALLET_KEY_PREFIX}${address}`;
   const cached = env.SNAPSHOTS?.get ? await env.SNAPSHOTS.get(key, 'json') : null;
   if (cached?.wallet?.address === address && Number.isFinite(Date.parse(cached.asOf))) return { wallet: cached.wallet, freshness: { cacheState: 'fresh', asOf: cached.asOf } };
-  const result = await heliusRpc('getAssetsByOwner', [{ ownerAddress: address, page: 1, limit: 100, displayOptions: { showFungible: true, showNativeBalance: true, showGrandTotal: true } }], apiKey);
+  const result = await heliusRpc('getAssetsByOwner', { ownerAddress: address, page: 1, limit: 100, displayOptions: { showFungible: true, showNativeBalance: true, showGrandTotal: true } }, apiKey);
   const mints = (Array.isArray(result?.items) ? result.items : []).map((item) => item?.id).filter((mint) => typeof mint === 'string').slice(0, 40);
   if (!mints.includes(SOL_MINT)) mints.unshift(SOL_MINT);
   let market = null;

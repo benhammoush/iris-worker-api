@@ -1,4 +1,4 @@
-export const API_VERSION = '3.3.1';
+export const API_VERSION = '3.3.2';
 export const CHAIN = 'solana';
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const SNAPSHOT_POINTER_KEY = 'snapshot:current';
