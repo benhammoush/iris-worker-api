@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAX_CATALOG_ASSETS, SOL_MINT } from '../src/constants.js';
-import { fetchPriceHistory, refreshMarket } from '../src/market.js';
+import { fetchPriceHistory, refreshDiscoveryCatalogs, refreshMarket } from '../src/market.js';
 
 test('market refresh uses Jupiter Tokens V2 fields for the verified ranked catalog', async () => {
   const originalFetch = globalThis.fetch;
@@ -38,6 +38,25 @@ test('market refresh preserves missing provider values as null', async () => {
 
 test('market refresh falls back when no Jupiter key is configured', async () => {
   assert.equal(await refreshMarket(undefined), null);
+});
+
+test('discovery catalogs use Jupiter Trending and Recent endpoints', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url) => {
+    const value = String(url); requests.push(value);
+    const token = value.includes('/toptrending/')
+      ? { id: 'Trend1111111111111111111111111111111111111', symbol: 'TREND', isVerified: true }
+      : { id: 'Recent111111111111111111111111111111111111', symbol: 'RECENT', isVerified: true };
+    return { ok: true, json: async () => [token] };
+  };
+  try {
+    const catalogs = await refreshDiscoveryCatalogs('jupiter-key');
+    assert.equal(catalogs.trending[0].symbol, 'TREND');
+    assert.equal(catalogs.recent[0].symbol, 'RECENT');
+    assert.ok(requests.some((url) => url.includes('/toptrending/24h?limit=10')));
+    assert.ok(requests.some((url) => url.endsWith('/recent')));
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test('CoinGecko Demo uses range-specific auto-granularity without truncating points', async () => {

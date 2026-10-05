@@ -66,6 +66,10 @@ export async function route(request, env, config, id, origin) {
   const snapshotHeaders = { 'cache-control': 'no-store', 'x-snapshot-state': state };
   if (url.pathname === '/v3/status') return json({ data: { version: API_VERSION, chain: 'solana', provenance: { snapshot: snapshot.source, market: snapshot.market.source, reviewedSwaps: snapshot.market.swaps?.source ?? 'unknown' }, freshness: { snapshot: state, snapshotCreatedAt: snapshot.createdAt, marketDataAsOf: snapshot.market.asOf }, reviewedSwaps: { scope: snapshot.market.swaps?.scope ?? 'registered-liquid-pools', count: snapshot.market.swaps?.count ?? snapshot.swaps.length } }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v3/assets') return json({ data: snapshot.assets.map(v3Asset), meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
+  if (url.pathname === '/v3/catalogs') {
+    const catalogs = snapshot.catalogs || { topTraded: snapshot.assets, trending: [], recent: [] };
+    return json({ data: { topTraded: (catalogs.topTraded || []).map(v3Asset), trending: (catalogs.trending || []).map(v3Asset), recent: (catalogs.recent || []).map(v3Asset) }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
+  }
   if (url.pathname === '/v3/swaps') return json({ data: { scope: snapshot.market.swaps?.scope ?? 'registered-liquid-pools', swaps: snapshot.swaps.map(v3Swap) }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
   if (url.pathname.startsWith('/v3/assets/mint/')) {
     const suffix = url.pathname.slice('/v3/assets/mint/'.length);

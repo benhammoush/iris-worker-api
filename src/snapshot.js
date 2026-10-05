@@ -1,6 +1,6 @@
 import { FIXTURE_SNAPSHOT, MARKET_SNAPSHOT } from './fixtures.js';
 import { FRESH_AFTER_MS, MAX_DISCOVERED_ASSETS, MAX_SWAPS, MAX_TRACKED_POOL_TRANSACTIONS, MAX_TRANSACTIONS_PER_WALLET, MAX_TRANSACTION_SCAN_PER_WALLET, SNAPSHOT_KEY_PREFIX, SNAPSHOT_POINTER_KEY, SOL_MINT, STALE_AFTER_MS, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from './constants.js';
-import { refreshMarket } from './market.js';
+import { refreshDiscoveryCatalogs, refreshMarket } from './market.js';
 import { isRegisteredDexSwap, protocolForSwap, registeredDexRoutes } from './dexRegistry.js';
 import { addAtomicAmounts, assetIdentity, decimalValue, formatAtomicAmount, isBase58PublicKey } from './transforms.js';
 
@@ -150,15 +150,17 @@ export async function refreshSnapshot(env, config, now = new Date()) {
     fetchTrackedPoolSwaps(apiKey).catch((cause) => { console.warn('Tracked pool swaps unavailable', { message: cause.message }); return existing.state === 'fixture' ? [] : existing.snapshot.swaps; }),
     heliusRpc('getSlot', [{ commitment: 'finalized' }], apiKey).catch(() => null)
   ]);
-  const market = await refreshMarket(config.jupiterApiKey || env.JUPITER_API_KEY);
+  const jupiterApiKey = config.jupiterApiKey || env.JUPITER_API_KEY;
+  const market = await refreshMarket(jupiterApiKey);
   if (!market || !market.assets.length) {
     if (existing.state !== 'fixture') return existing.snapshot;
     throw new Error('Jupiter market discovery is unavailable and no usable snapshot exists.');
   }
   const assets = market.assets;
+  const discoveryCatalogs = await refreshDiscoveryCatalogs(jupiterApiKey);
   const wallets = {};
   const swaps = trackedPoolResult.sort((left, right) => String(right.timestamp ?? '').localeCompare(String(left.timestamp ?? ''))).slice(0, MAX_SWAPS);
-  const snapshot = { version: 2, createdAt: now.toISOString(), source: 'helius-jupiter', market: { fees: null, slot: slotResult, block_height: slotResult, source: market.source, asOf: market.asOf, historySource: null, liveAssetCount: market.liveAssetCount, swaps: { count: swaps.length, asOf: new Date().toISOString(), source: 'helius-decoded-tracked-pools', scope: 'registered-liquid-pools', error: null }, history: [] }, assets, wallets, swaps };
+  const snapshot = { version: 2, createdAt: now.toISOString(), source: 'helius-jupiter', market: { fees: null, slot: slotResult, block_height: slotResult, source: market.source, asOf: market.asOf, historySource: null, liveAssetCount: market.liveAssetCount, swaps: { count: swaps.length, asOf: new Date().toISOString(), source: 'helius-decoded-tracked-pools', scope: 'registered-liquid-pools', error: null }, history: [] }, assets, catalogs: { topTraded: assets, ...discoveryCatalogs }, wallets, swaps };
   const key = `${SNAPSHOT_KEY_PREFIX}${now.getTime()}`;
   await env.SNAPSHOTS.put(key, JSON.stringify(snapshot));
   await env.SNAPSHOTS.put(SNAPSHOT_POINTER_KEY, JSON.stringify({ key, createdAt: snapshot.createdAt }));

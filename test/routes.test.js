@@ -36,6 +36,15 @@ test('fixture responses preserve cache, CORS, and snapshot envelopes', async () 
   assert.equal(response.headers.get('cache-control'), 'no-store'); assert.equal(response.headers.get('access-control-allow-origin'), 'https://app.example');
 });
 
+test('v3 catalogs returns the snapshot-backed Jupiter list shape', async () => {
+  const response = await worker.fetch(new Request('https://api.example/v3/catalogs'), env(), {});
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.data.topTraded.length, 3);
+  assert.deepEqual(body.data.trending, []);
+  assert.deepEqual(body.data.recent, []);
+});
+
 test('invalid mint and wallet paths return the existing not-found envelopes', async () => {
   const asset = await worker.fetch(new Request('https://api.example/v2/assets/mint/not-a-mint'), env(), {});
   const wallet = await worker.fetch(new Request('https://api.example/v2/wallets/not-a-wallet'), env(), {});

@@ -1,4 +1,4 @@
-import { MAX_CATALOG_ASSETS, SOL_MINT } from './constants.js';
+import { MAX_CATALOG_ASSETS, MAX_DISCOVERY_CATALOG_ASSETS, SOL_MINT } from './constants.js';
 import { assetIdentity } from './transforms.js';
 
 const JUPITER = 'https://api.jup.ag';
@@ -109,6 +109,25 @@ export async function refreshMarket(apiKey, candidateMints = null) {
     console.warn('Jupiter market refresh unavailable', { message: cause.message });
     return null;
   }
+}
+
+async function refreshDiscoveryCatalog(apiKey, path) {
+  try {
+    const tokens = payloadItems(await fetchJson(`${JUPITER}/tokens/v2/${path}`, apiKey, 'Jupiter'));
+    return catalogTokens(tokens).slice(0, MAX_DISCOVERY_CATALOG_ASSETS).map(tokenAsset).filter(Boolean);
+  } catch (cause) {
+    console.warn('Jupiter discovery catalog unavailable', { path, message: cause.message });
+    return [];
+  }
+}
+
+export async function refreshDiscoveryCatalogs(apiKey) {
+  if (!apiKey) return { trending: [], recent: [] };
+  const [trending, recent] = await Promise.all([
+    refreshDiscoveryCatalog(apiKey, `toptrending/24h?limit=${MAX_DISCOVERY_CATALOG_ASSETS}`),
+    refreshDiscoveryCatalog(apiKey, 'recent'),
+  ]);
+  return { trending, recent };
 }
 
 export async function fetchPriceHistory(mint, apiKey, range = '7d') {
