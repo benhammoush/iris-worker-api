@@ -1,6 +1,7 @@
 import { FIXTURE_SNAPSHOT, MARKET_SNAPSHOT } from './fixtures.js';
 import { FRESH_AFTER_MS, MAX_DISCOVERED_ASSETS, MAX_SWAPS, MAX_TRACKED_POOL_TRANSACTIONS, MAX_TRANSACTIONS_PER_WALLET, MAX_TRANSACTION_SCAN_PER_WALLET, SNAPSHOT_KEY_PREFIX, SNAPSHOT_POINTER_KEY, SOL_MINT, STALE_AFTER_MS, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from './constants.js';
 import { refreshDiscoveryCatalogs, refreshMarket } from './market.js';
+import { refreshNetworkMetrics } from './network.js';
 import { isRegisteredDexSwap, protocolForSwap, registeredDexRoutes } from './dexRegistry.js';
 import { addAtomicAmounts, assetIdentity, decimalValue, formatAtomicAmount, isBase58PublicKey } from './transforms.js';
 
@@ -146,9 +147,9 @@ export async function refreshSnapshot(env, config, now = new Date()) {
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
   const existing = await resolveSnapshot(env.SNAPSHOTS, now.getTime());
   if (!apiKey) return existing.state === 'fixture' ? FIXTURE_SNAPSHOT : existing.snapshot;
-  const [trackedPoolResult, slotResult] = await Promise.all([
+  const [trackedPoolResult, network] = await Promise.all([
     fetchTrackedPoolSwaps(apiKey).catch((cause) => { console.warn('Tracked pool swaps unavailable', { message: cause.message }); return existing.state === 'fixture' ? [] : existing.snapshot.swaps; }),
-    heliusRpc('getSlot', [{ commitment: 'finalized' }], apiKey).catch(() => null)
+    refreshNetworkMetrics((method, params) => heliusRpc(method, params, apiKey), existing.snapshot.network, now).catch((cause) => { console.warn('Helius network metrics unavailable', { message: cause.message }); return existing.snapshot.network || FIXTURE_SNAPSHOT.network; })
   ]);
   const jupiterApiKey = config.jupiterApiKey || env.JUPITER_API_KEY;
   const market = await refreshMarket(jupiterApiKey);
@@ -160,7 +161,7 @@ export async function refreshSnapshot(env, config, now = new Date()) {
   const discoveryCatalogs = await refreshDiscoveryCatalogs(jupiterApiKey);
   const wallets = {};
   const swaps = trackedPoolResult.sort((left, right) => String(right.timestamp ?? '').localeCompare(String(left.timestamp ?? ''))).slice(0, MAX_SWAPS);
-  const snapshot = { version: 2, createdAt: now.toISOString(), source: 'helius-jupiter', market: { fees: null, slot: slotResult, block_height: slotResult, source: market.source, asOf: market.asOf, historySource: null, liveAssetCount: market.liveAssetCount, swaps: { count: swaps.length, asOf: new Date().toISOString(), source: 'helius-decoded-tracked-pools', scope: 'registered-liquid-pools', error: null }, history: [] }, assets, catalogs: { topTraded: assets, ...discoveryCatalogs }, wallets, swaps };
+  const snapshot = { version: 2, createdAt: now.toISOString(), source: 'helius-jupiter', market: { fees: null, slot: network.chain?.finalizedSlot ?? null, block_height: network.chain?.blockHeight ?? null, source: market.source, asOf: market.asOf, historySource: null, liveAssetCount: market.liveAssetCount, swaps: { count: swaps.length, asOf: new Date().toISOString(), source: 'helius-decoded-tracked-pools', scope: 'registered-liquid-pools', error: null }, history: [] }, network, assets, catalogs: { topTraded: assets, ...discoveryCatalogs }, wallets, swaps };
   const key = `${SNAPSHOT_KEY_PREFIX}${now.getTime()}`;
   await env.SNAPSHOTS.put(key, JSON.stringify(snapshot));
   await env.SNAPSHOTS.put(SNAPSHOT_POINTER_KEY, JSON.stringify({ key, createdAt: snapshot.createdAt }));

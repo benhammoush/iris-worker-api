@@ -25,5 +25,6 @@ export const MARKET_SNAPSHOT = Object.freeze({
 export const FIXTURE_SNAPSHOT = {
   version: 1, createdAt: '1970-01-01T00:00:00.000Z', source: 'fixture',
   market: { fees: null, slot: null, block_height: null, source: MARKET_SNAPSHOT.source, asOf: MARKET_SNAPSHOT.asOf, history: [] },
+  network: { source: 'fixture', fetchedAt: null, chain: { state: 'unavailable', asOf: null }, performance: { state: 'unavailable', asOf: null }, production: { state: 'unavailable', asOf: null }, fees: { state: 'unavailable', asOf: null }, validators: { state: 'unavailable', asOf: null }, economics: { state: 'unavailable', asOf: null }, reliability: { state: 'unavailable', asOf: null } },
   assets: MARKET_SNAPSHOT.assets, catalogs: { topTraded: MARKET_SNAPSHOT.assets, trending: [], recent: [] }, wallets: {}, swaps: []
 };

@@ -45,6 +45,14 @@ test('v3 catalogs returns the snapshot-backed Jupiter list shape', async () => {
   assert.deepEqual(body.data.recent, []);
 });
 
+test('v3 network returns an explicit unavailable fixture without fabricating metrics', async () => {
+  const response = await worker.fetch(new Request('https://api.example/v3/network'), env(), {});
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.data.chain.state, 'unavailable');
+  assert.equal(body.data.chain.finalizedSlot, undefined);
+});
+
 test('invalid mint and wallet paths return the existing not-found envelopes', async () => {
   const asset = await worker.fetch(new Request('https://api.example/v2/assets/mint/not-a-mint'), env(), {});
   const wallet = await worker.fetch(new Request('https://api.example/v2/wallets/not-a-wallet'), env(), {});

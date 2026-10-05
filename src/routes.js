@@ -65,6 +65,7 @@ export async function route(request, env, config, id, origin) {
   };
   const snapshotHeaders = { 'cache-control': 'no-store', 'x-snapshot-state': state };
   if (url.pathname === '/v3/status') return json({ data: { version: API_VERSION, chain: 'solana', provenance: { snapshot: snapshot.source, market: snapshot.market.source, reviewedSwaps: snapshot.market.swaps?.source ?? 'unknown' }, freshness: { snapshot: state, snapshotCreatedAt: snapshot.createdAt, marketDataAsOf: snapshot.market.asOf }, reviewedSwaps: { scope: snapshot.market.swaps?.scope ?? 'registered-liquid-pools', count: snapshot.market.swaps?.count ?? snapshot.swaps.length } }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
+  if (url.pathname === '/v3/network') return json({ data: snapshot.network || { source: 'fixture', fetchedAt: null, chain: { state: 'unavailable', asOf: null }, performance: { state: 'unavailable', asOf: null }, production: { state: 'unavailable', asOf: null }, fees: { state: 'unavailable', asOf: null }, validators: { state: 'unavailable', asOf: null }, economics: { state: 'unavailable', asOf: null }, reliability: { state: 'unavailable', asOf: null } }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v3/assets') return json({ data: snapshot.assets.map(v3Asset), meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v3/catalogs') {
     const catalogs = snapshot.catalogs || { topTraded: snapshot.assets, trending: [], recent: [] };
