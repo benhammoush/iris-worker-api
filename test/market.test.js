@@ -47,15 +47,16 @@ test('discovery catalogs use Jupiter Trending and Recent endpoints', async () =>
     const value = String(url); requests.push(value);
     const token = value.includes('/toptrending/')
       ? { id: 'Trend1111111111111111111111111111111111111', symbol: 'TREND', isVerified: false }
-      : { id: 'Recent111111111111111111111111111111111111', symbol: 'RECENT', isVerified: false };
-    return { ok: true, json: async () => [token] };
+      : [{ id: 'LowRecent1111111111111111111111111111111111', symbol: 'LOW', isVerified: false, stats24h: { buyVolume: 4_000, sellVolume: 5_999 } }, { id: 'Recent111111111111111111111111111111111111', symbol: 'RECENT', isVerified: false, stats24h: { buyVolume: 4_000, sellVolume: 6_000 } }];
+    return { ok: true, json: async () => Array.isArray(token) ? token : [token] };
   };
   try {
     const catalogs = await refreshDiscoveryCatalogs('jupiter-key');
     assert.equal(catalogs.trending[0].symbol, 'TREND');
     assert.equal(catalogs.recent[0].symbol, 'RECENT');
+    assert.equal(catalogs.recent.length, 1);
     assert.equal(catalogs.trending[0].v3.verification.isVerified, false);
-    assert.ok(requests.some((url) => url.includes('/toptrending/24h?limit=10')));
+    assert.ok(requests.some((url) => url.endsWith('/toptrending/24h')));
     assert.ok(requests.some((url) => url.endsWith('/recent')));
   } finally { globalThis.fetch = originalFetch; }
 });
