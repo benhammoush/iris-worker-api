@@ -75,6 +75,7 @@ export function normalizeNetworkSnapshot(results, previous = null, now = new Dat
 }
 
 export async function refreshNetworkMetrics(rpc, previous = null, now = new Date()) {
+  console.info('Refreshing Helius network metrics');
   const initialMethods = ['getSlot:processed', 'getSlot:confirmed', 'getSlot:finalized', 'getBlockHeight', 'getEpochInfo', 'getRecentPerformanceSamples', 'getRecentPrioritizationFees', 'getVoteAccounts', 'getSupply', 'getInflationRate', 'getInflationGovernor'];
   const initial = await Promise.allSettled([
     rpc('getSlot', [{ commitment: 'processed' }]), rpc('getSlot', [{ commitment: 'confirmed' }]), rpc('getSlot', [{ commitment: 'finalized' }]), rpc('getBlockHeight', [{ commitment: 'finalized' }]), rpc('getEpochInfo', [{ commitment: 'finalized' }]), rpc('getRecentPerformanceSamples', [5]), rpc('getRecentPrioritizationFees', []), rpc('getVoteAccounts', [{ commitment: 'finalized' }]), rpc('getSupply', [{ commitment: 'finalized', excludeNonCirculatingAccountsList: true }]), rpc('getInflationRate', [{ commitment: 'finalized' }]), rpc('getInflationGovernor', [{ commitment: 'finalized' }])

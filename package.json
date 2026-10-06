@@ -1,6 +1,6 @@
 {
   "name": "iris-api",
-  "version": "3.5.9",
+  "version": "3.5.10",
   "description": "Iris market and curated-wallet API on Cloudflare Workers",
   "type": "module",
   "main": "src/index.js",
