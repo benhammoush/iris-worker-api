@@ -114,7 +114,7 @@ paths:
   /v3/defillama:
     get:
       responses:
-        '200': { description: Cached DefiLlama Solana DEX volumes and tracked DeFi protocols ranked by Solana TVL. This is aggregate protocol analytics, not a complete Solana program inventory., content: { application/json: { schema: { $ref: '#/components/schemas/DefiLlamaEnvelope' } } } }
+        '200': { description: Cached DefiLlama Solana DEX volumes and all tracked protocols that explicitly include Solana and have a finite Solana TVL, ranked by Solana TVL. Rows include provider logos. This is aggregate protocol analytics, not a complete Solana program inventory., content: { application/json: { schema: { $ref: '#/components/schemas/DefiLlamaEnvelope' } } } }
   /v3/transactions/recent:
     get:
       parameters:

@@ -1,8 +1,6 @@
 import { DEFILLAMA_DASHBOARD_KEY, DEFILLAMA_FRESH_AFTER_MS, STALE_AFTER_MS } from './constants.js';
 
 const DEFILLAMA = 'https://api.llama.fi';
-const MAX_DEXES = 5;
-const MAX_PROTOCOLS = 5;
 
 function finiteOrNull(value) {
   const number = Number(value);
@@ -18,12 +16,12 @@ function dexesFrom(payload) {
   if (!items) throw new Error('DefiLlama DEX overview payload is invalid.');
   const normalized = items.flatMap((item) => {
     if (!item || typeof item.name !== 'string' || !item.name || typeof item.slug !== 'string' || !item.slug) return [];
-    return [{ name: item.name, slug: item.slug, total24hUsd: finiteOrNull(item.total24h), total7dUsd: finiteOrNull(item.total7d), change1dPct: finiteOrNull(item.change_1d) }];
+    return [{ name: item.name, slug: item.slug, logo: typeof item.logo === 'string' && item.logo ? item.logo : null, total24hUsd: finiteOrNull(item.total24h), total7dUsd: finiteOrNull(item.total7d), change1dPct: finiteOrNull(item.change_1d) }];
   }).sort((left, right) => (right.total24hUsd ?? -Infinity) - (left.total24hUsd ?? -Infinity));
   return {
     total24hUsd: normalized.reduce((total, item) => total + (item.total24hUsd ?? 0), 0),
     total7dUsd: normalized.reduce((total, item) => total + (item.total7dUsd ?? 0), 0),
-    items: normalized.slice(0, MAX_DEXES)
+    items: normalized
   };
 }
 
@@ -31,10 +29,10 @@ function protocolsFrom(payload) {
   if (!Array.isArray(payload)) throw new Error('DefiLlama protocol payload is invalid.');
   const normalized = payload.flatMap((item) => {
     const solanaTvlUsd = finiteOrNull(item?.chainTvls?.Solana);
-    if (!item || typeof item.name !== 'string' || !item.name || typeof item.slug !== 'string' || !item.slug || solanaTvlUsd === null) return [];
-    return [{ name: item.name, slug: item.slug, category: typeof item.category === 'string' ? item.category : null, solanaTvlUsd, change1dPct: finiteOrNull(item.change_1d), change7dPct: finiteOrNull(item.change_7d) }];
+    if (!item || !Array.isArray(item.chains) || !item.chains.includes('Solana') || typeof item.name !== 'string' || !item.name || typeof item.slug !== 'string' || !item.slug || solanaTvlUsd === null) return [];
+    return [{ name: item.name, slug: item.slug, logo: typeof item.logo === 'string' && item.logo ? item.logo : null, category: typeof item.category === 'string' ? item.category : null, solanaTvlUsd, change1dPct: finiteOrNull(item.change_1d), change7dPct: finiteOrNull(item.change_7d) }];
   }).sort((left, right) => right.solanaTvlUsd - left.solanaTvlUsd);
-  return { total: normalized.length, items: normalized.slice(0, MAX_PROTOCOLS) };
+  return { total: normalized.length, items: normalized };
 }
 
 export function isUsableDefiLlamaDashboard(dashboard) {
