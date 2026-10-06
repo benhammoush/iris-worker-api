@@ -35,7 +35,7 @@ id = "8409635b839c49558d1b6e9bdeaf0f03"
 remote = true
 
 [env.staging.triggers]
-crons = ["* * * * *"]
+crons = ["0 * * * *"]
 
 [env.production]
 name = "iris-api"
@@ -48,4 +48,4 @@ binding = "SNAPSHOTS"
 id = "d9cc2796e2954a498851b3ad5ecefd59"
 
 [env.production.triggers]
-crons = ["* * * * *"]
+crons = ["0 * * * *"]

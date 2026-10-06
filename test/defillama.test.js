@@ -38,6 +38,7 @@ test('refresh normalizes, filters, sorts, and caches Solana DefiLlama data', asy
 test('load marks stale caches and rejects expired data', async () => {
   const cached = { source: 'defillama', fetchedAt: '2026-10-06T00:00:00.000Z', dexes: { total24hUsd: 1, total7dUsd: 1, items: [] }, protocols: { total: 0, items: [] } };
   const kv = { get: async () => cached };
-  assert.equal((await loadDefiLlamaDashboard(kv, Date.parse('2026-10-06T00:16:00.000Z'))).state, 'stale');
+  assert.equal((await loadDefiLlamaDashboard(kv, Date.parse('2026-10-06T00:16:00.000Z'))).state, 'fresh');
+  assert.equal((await loadDefiLlamaDashboard(kv, Date.parse('2026-10-06T01:00:00.001Z'))).state, 'stale');
   assert.equal((await loadDefiLlamaDashboard(kv, Date.parse('2026-10-07T01:00:00.000Z'))).state, 'unavailable');
 });

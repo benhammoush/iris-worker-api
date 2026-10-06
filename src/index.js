@@ -55,12 +55,7 @@ export default {
   async scheduled(event, env, ctx) {
     try {
       const config = getConfig(env);
-      const minute = Math.floor(event.scheduledTime / 60_000);
-      if (minute % 15 === 0) {
-        await Promise.all([refreshSnapshot(env, config), refreshHeliusDashboardBackstop(env, config), refreshDefiLlamaBackstop(env)]);
-      } else {
-        await refreshHeliusDashboardBackstop(env, config);
-      }
+      await Promise.all([refreshSnapshot(env, config), refreshHeliusDashboardBackstop(env, config), refreshDefiLlamaBackstop(env)]);
     } catch (cause) {
       console.error('scheduled refresh failed', { message: cause.message });
       throw cause;

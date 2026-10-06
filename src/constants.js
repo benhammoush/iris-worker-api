@@ -1,13 +1,14 @@
-export const API_VERSION = '3.11.0';
+export const API_VERSION = '3.11.1';
 export const CHAIN = 'solana';
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const SNAPSHOT_POINTER_KEY = 'snapshot:current';
 export const SNAPSHOT_KEY_PREFIX = 'snapshot:v2:';
 export const CANDLE_KEY_PREFIX = 'candles:v1:birdeye:';
 export const V3_WALLET_KEY_PREFIX = 'wallet:v3:';
-export const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+export const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 export const REFRESH_INTERVAL_MINUTES = REFRESH_INTERVAL_MS / 60_000;
-export const FRESH_AFTER_MS = 2 * REFRESH_INTERVAL_MS;
+export const SNAPSHOT_FRESH_AFTER_MS = 2 * REFRESH_INTERVAL_MS;
+export const FRESH_AFTER_MS = 30 * 60 * 1000;
 export const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 export const MAX_SWAPS = 50;
 export const MAX_TRANSACTIONS_PER_WALLET = 25;

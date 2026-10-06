@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FIXTURE_SNAPSHOT } from '../src/fixtures.js';
 import { resolveSnapshot } from '../src/snapshot.js';
-import { FRESH_AFTER_MS, STALE_AFTER_MS } from '../src/constants.js';
+import { SNAPSHOT_FRESH_AFTER_MS, STALE_AFTER_MS } from '../src/constants.js';
 
 const now = Date.parse('2026-10-02T12:00:00.000Z');
 
@@ -17,8 +17,8 @@ function snapshot(createdAt) {
 }
 
 test('snapshot resolver distinguishes fresh, stale, and fixture data at exact boundaries', async () => {
-  const fresh = await resolveSnapshot(kv(snapshot(new Date(now - FRESH_AFTER_MS).toISOString())), now);
-  const stale = await resolveSnapshot(kv(snapshot(new Date(now - FRESH_AFTER_MS - 1).toISOString())), now);
+  const fresh = await resolveSnapshot(kv(snapshot(new Date(now - SNAPSHOT_FRESH_AFTER_MS).toISOString())), now);
+  const stale = await resolveSnapshot(kv(snapshot(new Date(now - SNAPSHOT_FRESH_AFTER_MS - 1).toISOString())), now);
   const oldestStale = await resolveSnapshot(kv(snapshot(new Date(now - STALE_AFTER_MS).toISOString())), now);
   const expired = await resolveSnapshot(kv(snapshot(new Date(now - STALE_AFTER_MS - 1).toISOString())), now);
   assert.equal(fresh.state, 'fresh');

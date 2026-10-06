@@ -1,5 +1,5 @@
 import { FIXTURE_SNAPSHOT, MARKET_SNAPSHOT } from './fixtures.js';
-import { FRESH_AFTER_MS, MAX_DISCOVERED_ASSETS, MAX_SWAPS, MAX_TRACKED_POOL_TRANSACTIONS, MAX_TRANSACTIONS_PER_WALLET, MAX_TRANSACTION_SCAN_PER_WALLET, SNAPSHOT_KEY_PREFIX, SNAPSHOT_POINTER_KEY, SOL_MINT, STALE_AFTER_MS, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from './constants.js';
+import { MAX_DISCOVERED_ASSETS, MAX_SWAPS, MAX_TRACKED_POOL_TRANSACTIONS, MAX_TRANSACTIONS_PER_WALLET, MAX_TRANSACTION_SCAN_PER_WALLET, SNAPSHOT_FRESH_AFTER_MS, SNAPSHOT_KEY_PREFIX, SNAPSHOT_POINTER_KEY, SOL_MINT, STALE_AFTER_MS, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from './constants.js';
 import { refreshDiscoveryCatalogs, refreshMarket } from './market.js';
 import { refreshNetworkMetrics } from './network.js';
 import { isRegisteredDexSwap, protocolForSwap, registeredDexRoutes } from './dexRegistry.js';
@@ -37,7 +37,7 @@ export async function resolveSnapshot(kv, now = Date.now()) {
   if (!isUsableSnapshot(snapshot)) return { snapshot: FIXTURE_SNAPSHOT, state: 'fixture' };
   const age = now - Date.parse(snapshot.createdAt);
   if (age < 0 || age > STALE_AFTER_MS) return { snapshot: FIXTURE_SNAPSHOT, state: 'fixture' };
-  return { snapshot, state: age <= FRESH_AFTER_MS ? 'fresh' : 'stale' };
+  return { snapshot, state: age <= SNAPSHOT_FRESH_AFTER_MS ? 'fresh' : 'stale' };
 }
 
 function normalizeTokenChange(change) {

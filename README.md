@@ -26,7 +26,7 @@ Birdeye token candles are provider-defined market aggregation and are not a sele
 
 ## Snapshot behavior
 
-The production Cron runs every minute. Every run refreshes the cached recent-transaction sample. Every fifteenth minute it also refreshes the complete Jupiter/Helius snapshot and a separate DefiLlama dashboard cache. A complete versioned snapshot is written to KV before its pointer is published, so readers never receive a partial refresh.
+The production Cron runs at the start of every hour. Each run refreshes the complete Jupiter/Helius snapshot, the Helius dashboard cache, and a separate DefiLlama dashboard cache. A complete versioned snapshot is written to KV before its pointer is published, so readers never receive a partial refresh.
 
 ## API versions
 
