@@ -8,8 +8,8 @@ import { addAtomicAmounts, assetIdentity, decimalValue, formatAtomicAmount, isBa
 const HELIUS_RPC = 'https://mainnet.helius-rpc.com/';
 const HELIUS_ENHANCED = 'https://api.helius.xyz/v0';
 
-async function heliusRpc(method, params, apiKey) {
-  const response = await fetch(`${HELIUS_RPC}?api-key=${encodeURIComponent(apiKey)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: method, method, params }), signal: AbortSignal.timeout(10_000) });
+async function heliusRpc(method, params, apiKey, timeoutMs = 10_000) {
+  const response = await fetch(`${HELIUS_RPC}?api-key=${encodeURIComponent(apiKey)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: method, method, params }), signal: AbortSignal.timeout(timeoutMs) });
   if (!response.ok) throw new Error(`Helius RPC request failed with ${response.status}: ${(await response.text()).slice(0, 500)}`);
   const payload = await response.json();
   if (payload.error) throw new Error(`Helius RPC error: ${payload.error.message || 'unknown'}`);
@@ -149,7 +149,7 @@ export async function refreshSnapshot(env, config, now = new Date()) {
   if (!apiKey) return existing.state === 'fixture' ? FIXTURE_SNAPSHOT : existing.snapshot;
   const [trackedPoolResult, network] = await Promise.all([
     fetchTrackedPoolSwaps(apiKey).catch((cause) => { console.warn('Tracked pool swaps unavailable', { message: cause.message }); return existing.state === 'fixture' ? [] : existing.snapshot.swaps; }),
-    refreshNetworkMetrics((method, params) => heliusRpc(method, params, apiKey), existing.snapshot.network, now).catch((cause) => { console.warn('Helius network metrics unavailable', { message: cause.message }); return existing.snapshot.network || FIXTURE_SNAPSHOT.network; })
+    refreshNetworkMetrics((method, params, timeoutMs) => heliusRpc(method, params, apiKey, timeoutMs), existing.snapshot.network, now).catch((cause) => { console.warn('Helius network metrics unavailable', { message: cause.message }); return existing.snapshot.network || FIXTURE_SNAPSHOT.network; })
   ]);
   const jupiterApiKey = config.jupiterApiKey || env.JUPITER_API_KEY;
   const market = await refreshMarket(jupiterApiKey);

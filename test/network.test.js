@@ -37,6 +37,8 @@ test('network refresh uses the latest actual finalized block for average fees', 
   };
   const snapshot = await refreshNetworkMetrics(rpc, null, new Date('2026-10-06T00:00:00.000Z'));
   assert.deepEqual(calls.find(([method]) => method === 'getBlock')?.[1]?.slice(0, 1), [999]);
+  assert.equal(calls.find(([method]) => method === 'getBlock')?.[1]?.[1]?.maxSupportedTransactionVersion, 1);
+  assert.deepEqual(calls.find(([method]) => method === 'getInflationRate')?.[1], []);
   assert.equal(snapshot.fees.averageFeeLamports, 6000);
   assert.equal(snapshot.fees.medianPriorityFeeMicroLamports, 25);
 });
