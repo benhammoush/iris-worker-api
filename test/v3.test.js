@@ -103,6 +103,23 @@ test('recent transaction samples batch parsed actions, preserve signature order,
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('recent transaction samples remain fresh when Parsed Events is unavailable', async () => {
+  const cache = new Map(); const snapshots = { get: async (key) => cache.get(key) || null, put: async (key, value) => cache.set(key, JSON.parse(value)) };
+  const originalFetch = globalThis.fetch; const originalWarn = console.warn;
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    if (request.method === 'getSlot') return { ok: true, json: async () => ({ result: 123 }) };
+    if (request.method === 'getBlock') return { ok: true, json: async () => ({ result: { blockTime: 1_760_000_000, signatures: ['sig-a'] } }) };
+    if (Array.isArray(request.transactions)) return { ok: false, status: 403 };
+    throw new Error(`Unexpected ${request.method}`);
+  };
+  console.warn = () => {};
+  try {
+    const sample = await refreshRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date('2026-10-06T00:00:00.000Z'));
+    assert.equal(sample.source, 'helius-rpc'); assert.equal(sample.transactions[0].action, null);
+  } finally { globalThis.fetch = originalFetch; console.warn = originalWarn; }
+});
+
 test('DAS wallet mapping preserves atomic balances, caps holdings, and reports partial valuation', () => {
   const result = { nativeBalance: { lamports: '1000000000' }, items: Array.from({ length: 41 }, (_, index) => ({ id: `Mint${index}`, token_info: { balance: '2500000', decimals: 6 } })) };
   const wallet = mapDasWallet('11111111111111111111111111111111', result, [{ mint: SOL_MINT, symbol: 'SOL', name: 'Solana', decimals: 9, iconUrl: null, priceUsd: 100 }, { mint: 'Mint0', symbol: 'M0', name: 'M0', decimals: 6, iconUrl: null, priceUsd: 2 }]);

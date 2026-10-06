@@ -32,9 +32,16 @@ export async function refreshRecentTransactionSample(env, config, now = new Date
   const block = await heliusRpc('getBlock', [slot, { commitment: 'confirmed', transactionDetails: 'signatures', rewards: false, maxSupportedTransactionVersion: 1 }], apiKey);
   const blockTime = Number.isFinite(block?.blockTime) ? new Date(block.blockTime * 1000).toISOString() : null;
   const signatures = signaturesFromBlock(block).slice(0, V3_RECENT_TRANSACTIONS_MAX);
-  const parsedBySignature = new Map((await parsedEvents(signatures, apiKey)).filter((event) => typeof event?.signature === 'string').map((event) => [event.signature, event]));
+  let parsed = null;
+  try {
+    parsed = await parsedEvents(signatures, apiKey);
+  } catch (cause) {
+    // A parser outage must not stop the lightweight block sample from advancing.
+    console.warn('Helius Parsed Events unavailable for recent transactions', { message: cause.message });
+  }
+  const parsedBySignature = new Map((parsed || []).filter((event) => typeof event?.signature === 'string').map((event) => [event.signature, event]));
   const transactions = signatures.map((signature) => ({ signature, slot, blockTime, status: 'confirmed', action: actionFromParsedEvent(parsedBySignature.get(signature)) }));
-  const sample = { version: 2, source: 'helius-rpc-parsed-events', asOf: now.toISOString(), slot, transactions };
+  const sample = { version: 2, source: parsed ? 'helius-rpc-parsed-events' : 'helius-rpc', asOf: now.toISOString(), slot, transactions };
   if (env.SNAPSHOTS?.put) await env.SNAPSHOTS.put(V3_RECENT_TRANSACTIONS_KEY, JSON.stringify(sample), { expirationTtl: Math.ceil(STALE_AFTER_MS / 1000) });
   return sample;
 }
