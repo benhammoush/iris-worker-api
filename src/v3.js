@@ -33,7 +33,7 @@ export function mapV3HistoryPoints(points) {
   });
 }
 
-async function heliusRpc(method, params, apiKey) {
+export async function heliusRpc(method, params, apiKey) {
   const response = await fetch(`${HELIUS_RPC}?api-key=${encodeURIComponent(apiKey)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: method, method, params }), signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`Helius RPC request failed with ${response.status}`);
   const payload = await response.json();

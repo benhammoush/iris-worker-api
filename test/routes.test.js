@@ -53,6 +53,24 @@ test('v3 network returns an explicit unavailable fixture without fabricating met
   assert.equal(body.data.chain.finalizedSlot, undefined);
 });
 
+test('v3 recent transactions returns a bounded sampled signature feed', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    if (request.method === 'getSlot') return { ok: true, json: async () => ({ result: 123 }) };
+    if (request.method === 'getBlock') return { ok: true, json: async () => ({ result: { blockTime: 1_760_000_000, signatures: Array.from({ length: 21 }, (_, index) => `sig-${index}`) } }) };
+    throw new Error(`Unexpected ${request.method}`);
+  };
+  try {
+    const response = await worker.fetch(new Request('https://api.example/v3/transactions/recent?limit=15'), env({ HELIUS_API_KEY: 'h', SNAPSHOTS: { get: async () => null, put: async () => {} } }), {});
+    const body = await response.json();
+    assert.equal(response.status, 200); assert.equal(body.data.transactions.length, 15);
+    assert.equal(body.data.transactions[0].status, 'confirmed'); assert.equal(body.meta.recentTransactions.sampled, true);
+    const invalid = await worker.fetch(new Request('https://api.example/v3/transactions/recent?limit=21'), env(), {});
+    assert.equal(invalid.status, 400); assert.equal((await invalid.json()).error.code, 'INVALID_RECENT_TRANSACTION_LIMIT');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('invalid mint and wallet paths return the existing not-found envelopes', async () => {
   const asset = await worker.fetch(new Request('https://api.example/v2/assets/mint/not-a-mint'), env(), {});
   const wallet = await worker.fetch(new Request('https://api.example/v2/wallets/not-a-wallet'), env(), {});

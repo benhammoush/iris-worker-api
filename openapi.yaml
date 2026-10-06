@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 3.4.0
+  version: 3.6.0
 paths:
   /internal/refresh:
     post:
@@ -111,6 +111,13 @@ paths:
     get:
       responses:
         '200': { description: Canonical reviewed-pool registry-scoped swaps only, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+  /v3/transactions/recent:
+    get:
+      parameters:
+        - { in: query, name: limit, schema: { type: integer, minimum: 10, maximum: 20, default: 15 } }
+      responses:
+        '200': { description: Cached representative signature sample from one recent confirmed block. This is not a complete chain-wide transaction feed., content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+        '400': { description: INVALID_RECENT_TRANSACTION_LIMIT, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
 components:
   schemas:
     Envelope:

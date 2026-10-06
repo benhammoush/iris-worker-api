@@ -4,6 +4,7 @@ import { fetchPriceHistory, mapV3Asset, tokenByMint } from './market.js';
 import { isUsableSnapshot, loadWalletData, resolveSnapshot } from './snapshot.js';
 import { isBase58PublicKey } from './transforms.js';
 import { loadV3Events, loadV3Wallet, mapV3HistoryPoints, v3Asset } from './v3.js';
+import { loadRecentTransactionSample } from './recentTransactions.js';
 
 function usableHistory(history) {
   return history && typeof history === 'object' && Number.isFinite(Date.parse(history.fetchedAt)) && Array.isArray(history.points);
@@ -72,6 +73,13 @@ export async function route(request, env, config, id, origin) {
     return json({ data: { topTraded: (catalogs.topTraded || []).map(v3Asset), trending: (catalogs.trending || []).map(v3Asset), recent: (catalogs.recent || []).map(v3Asset) }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
   }
   if (url.pathname === '/v3/swaps') return json({ data: { scope: snapshot.market.swaps?.scope ?? 'registered-liquid-pools', swaps: snapshot.swaps.map(v3Swap) }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
+  if (url.pathname === '/v3/transactions/recent') {
+    const rawLimit = url.searchParams.get('limit');
+    const limit = rawLimit === null ? 15 : Number(rawLimit);
+    if (!Number.isInteger(limit) || limit < 10 || limit > 20) return error('INVALID_RECENT_TRANSACTION_LIMIT', 'limit must be an integer from 10 to 20.', 400, id, origin);
+    const sample = await loadRecentTransactionSample(env, config);
+    return json({ data: { transactions: sample.transactions.slice(0, limit) }, meta: { ...v3Meta(meta), recentTransactions: { source: sample.source, freshness: sample.freshness, asOf: sample.asOf, slot: sample.slot, sampled: true, limit } } }, 200, id, origin, snapshotHeaders);
+  }
   if (url.pathname.startsWith('/v3/assets/mint/')) {
     const suffix = url.pathname.slice('/v3/assets/mint/'.length);
     const historySuffix = suffix.endsWith('/history');
