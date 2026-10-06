@@ -1,6 +1,8 @@
 import { STALE_AFTER_MS, V3_RECENT_TRANSACTIONS_FRESH_AFTER_MS, V3_RECENT_TRANSACTIONS_KEY, V3_RECENT_TRANSACTIONS_MAX } from './constants.js';
 import { heliusRpc } from './v3.js';
 
+let pendingRefresh = null;
+
 function usableSample(sample) {
   return sample && typeof sample === 'object' && Number.isFinite(Date.parse(sample.asOf)) && Number.isInteger(sample.slot) && Array.isArray(sample.transactions);
 }
@@ -46,10 +48,20 @@ export async function refreshRecentTransactionSample(env, config, now = new Date
   return sample;
 }
 
-export async function loadRecentTransactionSample(env, config, now = new Date()) {
+export async function loadRecentTransactionSample(env, config, now = new Date(), refreshIfStale = false) {
   const cached = env.SNAPSHOTS?.get ? await env.SNAPSHOTS.get(V3_RECENT_TRANSACTIONS_KEY, 'json') : null;
   const age = usableSample(cached) ? now.getTime() - Date.parse(cached.asOf) : Infinity;
   if (age >= 0 && age <= V3_RECENT_TRANSACTIONS_FRESH_AFTER_MS) return { ...cached, freshness: 'fresh' };
+  if (refreshIfStale) {
+    try {
+      // Coalesce concurrent cache misses in this Worker isolate before calling Helius.
+      pendingRefresh ||= refreshRecentTransactionSample(env, config, now).finally(() => { pendingRefresh = null; });
+      const sample = await pendingRefresh;
+      return { ...sample, freshness: 'fresh' };
+    } catch (cause) {
+      console.warn('Recent transaction refresh unavailable', { message: cause.message });
+    }
+  }
   if (age >= 0 && age <= STALE_AFTER_MS) return { ...cached, freshness: 'stale' };
   return { source: 'helius-rpc-parsed-events', asOf: null, slot: null, transactions: [], freshness: 'unavailable' };
 }

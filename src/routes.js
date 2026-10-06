@@ -77,7 +77,7 @@ export async function route(request, env, config, id, origin) {
     const rawLimit = url.searchParams.get('limit');
     const limit = rawLimit === null ? 15 : Number(rawLimit);
     if (!Number.isInteger(limit) || limit < 10 || limit > 20) return error('INVALID_RECENT_TRANSACTION_LIMIT', 'limit must be an integer from 10 to 20.', 400, id, origin);
-    const sample = await loadRecentTransactionSample(env, config);
+    const sample = await loadRecentTransactionSample(env, config, new Date(), true);
     return json({ data: { transactions: sample.transactions.slice(0, limit) }, meta: { ...v3Meta(meta), recentTransactions: { source: sample.source, freshness: sample.freshness, asOf: sample.asOf, slot: sample.slot, sampled: true, limit } } }, 200, id, origin, snapshotHeaders);
   }
   if (url.pathname.startsWith('/v3/assets/mint/')) {

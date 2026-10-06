@@ -94,11 +94,13 @@ test('recent transaction samples batch parsed actions, preserve signature order,
     const now = new Date('2026-10-06T00:00:00.000Z');
     await refreshRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, now);
     const first = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, now);
-    const second = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 10_000));
+    const second = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 10_000), true);
     assert.equal(first.freshness, 'fresh'); assert.deepEqual(first.transactions, [{ signature: 'sig-a', slot: 123, blockTime: '2025-10-09T08:53:20.000Z', status: 'confirmed', action: 'swap' }, { signature: 'sig-b', slot: 123, blockTime: '2025-10-09T08:53:20.000Z', status: 'confirmed', action: 'create_account' }]);
     assert.equal(second.freshness, 'fresh'); assert.equal(calls, 3);
+    const refreshed = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 16_000), true);
+    assert.equal(refreshed.freshness, 'fresh'); assert.equal(calls, 6);
     globalThis.fetch = async () => { throw new Error('provider unavailable'); };
-    const stale = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 121_000));
+    const stale = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 32_000), true);
     assert.equal(stale.freshness, 'stale'); assert.equal(stale.transactions.length, 2);
   } finally { globalThis.fetch = originalFetch; }
 });
