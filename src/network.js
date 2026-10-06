@@ -87,10 +87,12 @@ export async function refreshNetworkMetrics(rpc, previous = null, now = new Date
   const blockSlotsResult = finalizedSlot === null ? { status: 'rejected', reason: new Error('Finalized slot unavailable') } : await Promise.allSettled([rpc('getBlocksWithLimit', [Math.max(0, finalizedSlot - 500), 500, { commitment: 'finalized' }])]).then(([result]) => result);
   const blockSlots = fulfilled(blockSlotsResult);
   const latestBlockSlot = Array.isArray(blockSlots) && blockSlots.length ? blockSlots[blockSlots.length - 1] : null;
+  if (blockSlotsResult.status === 'rejected') console.warn('Helius network RPC unavailable', { method: 'getBlocksWithLimit', message: blockSlotsResult.reason?.message || String(blockSlotsResult.reason) });
+  else if (latestBlockSlot === null) console.warn('Helius network RPC returned no block slots', { method: 'getBlocksWithLimit', finalizedSlot });
   const dependent = await Promise.allSettled([
     finalizedSlot === null ? Promise.reject(new Error('Finalized slot unavailable')) : rpc('getBlockTime', [finalizedSlot]),
     finalizedSlot === null || !epochInfo ? Promise.reject(new Error('Epoch range unavailable')) : rpc('getBlockProduction', [{ commitment: 'finalized', range: { firstSlot: epochInfo.absoluteSlot - epochInfo.slotIndex, lastSlot: finalizedSlot } }]),
-    latestBlockSlot === null ? Promise.reject(new Error('No recent finalized block is available')) : rpc('getBlock', [latestBlockSlot, { commitment: 'finalized', transactionDetails: 'full', rewards: false, maxSupportedTransactionVersion: 1 }])
+    finalizedSlot === null ? Promise.reject(new Error('Finalized slot unavailable')) : rpc('getBlock', [latestBlockSlot ?? finalizedSlot, { commitment: 'finalized', transactionDetails: 'full', rewards: false, maxSupportedTransactionVersion: 1 }])
   ]);
   logRejectedRpcCalls(['getBlockTime', 'getBlockProduction', 'getBlock'], dependent);
   const [blockTime, production, block] = dependent;

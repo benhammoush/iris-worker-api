@@ -51,3 +51,24 @@ test('supply remains available when inflation data is unavailable', () => {
   assert.equal(snapshot.economics.totalSol, 1);
   assert.equal(snapshot.economics.circulatingSol, 0.8);
 });
+
+test('network refresh falls back to the finalized slot when the block list is empty', async () => {
+  const calls = [];
+  const rpc = async (method, params) => {
+    calls.push([method, params]);
+    if (method === 'getSlot') return 1000;
+    if (method === 'getBlockHeight') return 900;
+    if (method === 'getEpochInfo') return { epoch: 1, slotIndex: 100, slotsInEpoch: 432000, absoluteSlot: 1000 };
+    if (method === 'getRecentPerformanceSamples' || method === 'getRecentPrioritizationFees') return [];
+    if (method === 'getVoteAccounts') return { current: [], delinquent: [] };
+    if (method === 'getSupply') return { value: {} };
+    if (method === 'getInflationRate' || method === 'getInflationGovernor') return {};
+    if (method === 'getBlocksWithLimit') return [];
+    if (method === 'getBlockTime') return 1;
+    if (method === 'getBlockProduction') return { value: { byIdentity: {} } };
+    if (method === 'getBlock') return { transactions: [] };
+    throw new Error(`Unexpected ${method}`);
+  };
+  await refreshNetworkMetrics(rpc);
+  assert.deepEqual(calls.find(([method]) => method === 'getBlock')?.[1]?.slice(0, 1), [1000]);
+});
