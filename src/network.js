@@ -75,10 +75,13 @@ export async function refreshNetworkMetrics(rpc, previous = null, now = new Date
   const [processed, confirmed, finalized, blockHeight, epoch, performance, priorityFees, voteAccounts, supply, inflationRate, inflationGovernor] = initial;
   const finalizedSlot = fulfilled(finalized);
   const epochInfo = fulfilled(epoch);
+  const blockSlotsResult = finalizedSlot === null ? { status: 'rejected', reason: new Error('Finalized slot unavailable') } : await Promise.allSettled([rpc('getBlocksWithLimit', [Math.max(0, finalizedSlot - 500), 500, { commitment: 'finalized' }])]).then(([result]) => result);
+  const blockSlots = fulfilled(blockSlotsResult);
+  const latestBlockSlot = Array.isArray(blockSlots) && blockSlots.length ? blockSlots[blockSlots.length - 1] : null;
   const dependent = await Promise.allSettled([
     finalizedSlot === null ? Promise.reject(new Error('Finalized slot unavailable')) : rpc('getBlockTime', [finalizedSlot]),
     finalizedSlot === null || !epochInfo ? Promise.reject(new Error('Epoch range unavailable')) : rpc('getBlockProduction', [{ commitment: 'finalized', range: { firstSlot: epochInfo.absoluteSlot - epochInfo.slotIndex, lastSlot: finalizedSlot } }]),
-    finalizedSlot === null ? Promise.reject(new Error('Finalized block unavailable')) : rpc('getBlock', [finalizedSlot, { commitment: 'finalized', transactionDetails: 'full', rewards: false, maxSupportedTransactionVersion: 0 }])
+    latestBlockSlot === null ? Promise.reject(new Error('No recent finalized block is available')) : rpc('getBlock', [latestBlockSlot, { commitment: 'finalized', transactionDetails: 'full', rewards: false, maxSupportedTransactionVersion: 0 }])
   ]);
   const [blockTime, production, block] = dependent;
   return normalizeNetworkSnapshot({ slots: { status: processed.status === 'fulfilled' && confirmed.status === 'fulfilled' && finalized.status === 'fulfilled' ? 'fulfilled' : 'rejected', value: { processed: fulfilled(processed), confirmed: fulfilled(confirmed), finalized: finalizedSlot } }, blockHeight, epoch, performance, priorityFees, voteAccounts, supply, inflationRate, inflationGovernor, blockTime, production, block }, previous, now);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeNetworkSnapshot, summarizePerformance, summarizeProduction } from '../src/network.js';
+import { normalizeNetworkSnapshot, refreshNetworkMetrics, summarizePerformance, summarizeProduction } from '../src/network.js';
 
 test('network summaries use weighted TPS and current-epoch aggregate production', () => {
   assert.deepEqual(summarizePerformance([{ numTransactions: 100, numNonVoteTransactions: 80, samplePeriodSecs: 2 }, { numTransactions: 150, numNonVoteTransactions: 90, samplePeriodSecs: 3 }]), { tps: 50, nonVoteTps: 34, sampleCount: 2, samplePeriodSecs: 5, transactions: 250, nonVoteTransactions: 170 });
@@ -14,4 +14,29 @@ test('failed network groups retain prior values as stale without substituting ze
   assert.equal(snapshot.performance.tps, 42);
   assert.equal(snapshot.chain.state, 'stale');
   assert.equal(snapshot.fees.state, 'unavailable');
+});
+
+test('network refresh uses the latest actual finalized block for average fees', async () => {
+  const calls = [];
+  const rpc = async (method, params) => {
+    calls.push([method, params]);
+    if (method === 'getSlot') return params[0].commitment === 'finalized' ? 1000 : 1001;
+    if (method === 'getBlockHeight') return 900;
+    if (method === 'getEpochInfo') return { epoch: 1, slotIndex: 100, slotsInEpoch: 432000, absoluteSlot: 1000 };
+    if (method === 'getRecentPerformanceSamples') return [];
+    if (method === 'getRecentPrioritizationFees') return [{ prioritizationFee: 25 }];
+    if (method === 'getVoteAccounts') return { current: [], delinquent: [] };
+    if (method === 'getSupply') return { value: {} };
+    if (method === 'getInflationRate') return {};
+    if (method === 'getInflationGovernor') return {};
+    if (method === 'getBlocksWithLimit') return [997, 999];
+    if (method === 'getBlockTime') return 1;
+    if (method === 'getBlockProduction') return { value: { byIdentity: {} } };
+    if (method === 'getBlock') return { transactions: [{ meta: { fee: 5000, err: null } }, { meta: { fee: 7000, err: null } }] };
+    throw new Error(`Unexpected ${method}`);
+  };
+  const snapshot = await refreshNetworkMetrics(rpc, null, new Date('2026-10-06T00:00:00.000Z'));
+  assert.deepEqual(calls.find(([method]) => method === 'getBlock')?.[1]?.slice(0, 1), [999]);
+  assert.equal(snapshot.fees.averageFeeLamports, 6000);
+  assert.equal(snapshot.fees.medianPriorityFeeMicroLamports, 25);
 });
