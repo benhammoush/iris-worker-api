@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAX_CATALOG_ASSETS, SOL_MINT } from '../src/constants.js';
-import { fetchPriceHistory, refreshDiscoveryCatalogs, refreshMarket } from '../src/market.js';
+import { fetchCandles, fetchPriceHistory, refreshDiscoveryCatalogs, refreshMarket } from '../src/market.js';
 
 test('market refresh uses Jupiter Tokens V2 fields for the verified ranked catalog', async () => {
   const originalFetch = globalThis.fetch;
@@ -61,19 +61,24 @@ test('discovery catalogs use Jupiter Trending and Recent endpoints', async () =>
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test('CoinGecko Demo uses range-specific auto-granularity without truncating points', async () => {
+test('Birdeye requests USD Solana candles with the configured interval and preserves valid OHLCV data', async () => {
   const originalFetch = globalThis.fetch;
   let request;
   globalThis.fetch = async (url, options) => {
     request = { url: String(url), options };
-    return { ok: true, json: async () => ({ prices: [[1_760_000_000_000, 150], [1_760_086_400_000, 151]] }) };
+    return { ok: true, json: async () => ({ success: true, data: { items: [{ unix_time: 1_760_000_000, o: 149, h: 152, l: 148, c: 150, v: 20, v_usd: 3000 }, { unix_time: 1_760_086_400, o: 150, h: 153, l: 149, c: 151, v: 21, v_usd: 3200 }] } }) };
   };
   try {
-    const points = await fetchPriceHistory(SOL_MINT, 'coingecko-demo-key', '1d');
-    assert.match(request.url, /coins\/solana\/contract\/So11111111111111111111111111111111111111112\/market_chart/);
-    assert.match(request.url, /days=1/);
-    assert.doesNotMatch(request.url, /interval=/);
-    assert.equal(request.options.headers['x-cg-demo-api-key'], 'coingecko-demo-key');
+    const candles = await fetchCandles(SOL_MINT, 'birdeye-key', '1d', 1_760_086_400_000);
+    const points = await fetchPriceHistory(SOL_MINT, 'birdeye-key', '1d');
+    assert.match(request.url, /public-api\.birdeye\.so\/defi\/v3\/ohlcv/);
+    assert.match(request.url, /type=15m/);
+    assert.match(request.url, /currency=usd/);
+    assert.equal(request.options.headers['X-API-KEY'], 'birdeye-key');
+    assert.equal(request.options.headers['x-chain'], 'solana');
+    assert.equal(candles.interval, '15m');
+    assert.equal(candles.candles[0].closeUsd, 150);
+    assert.equal(candles.candles[0].volumeUsd, 3000);
     assert.deepEqual(points.map((point) => point.price), [150, 151]);
   } finally { globalThis.fetch = originalFetch; }
 });

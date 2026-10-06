@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 3.10.0
+  version: 3.11.0
 paths:
   /internal/refresh:
     post:
@@ -39,7 +39,7 @@ paths:
           required: true
           schema: { type: string }
       responses:
-          '200': { description: Asset found by its canonical mint address, with up to seven daily CoinGecko price points when available. History metadata reports fresh, stale, fixture, or unavailable state. }
+          '200': { description: Asset found by its canonical mint address, with Birdeye close-price history when requested. History metadata reports fresh, stale, fixture, or unavailable state. }
         '404': { description: Asset not found }
   /v2/assets/{symbol}:
     get:
@@ -81,7 +81,9 @@ paths:
         '200': { description: Canonical Jupiter Tokens V2 assets, content: { application/json: { schema: { $ref: '#/components/schemas/AssetEnvelope' } } } }
   /v3/assets/mint/{mint}:
     get:
-      parameters: [{ in: path, name: mint, required: true, schema: { type: string } }]
+      parameters:
+        - { in: path, name: mint, required: true, schema: { type: string } }
+        - { in: query, name: includeHistory, schema: { type: boolean, default: true } }
       responses:
         '200': { description: Canonical asset, including seven-day history state by default. Valid Solana mints outside the catalog are resolved on demand through Jupiter., content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
         '404': { description: ASSET_NOT_FOUND, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
@@ -91,7 +93,14 @@ paths:
         - { in: path, name: mint, required: true, schema: { type: string } }
         - { in: query, name: range, schema: { type: string, enum: [1d, 7d], default: 7d } }
       responses:
-        '200': { description: Canonical CoinGecko price points or null when unavailable. One day uses provider auto-granularity (typically five minutes); seven days typically returns hourly points., content: { application/json: { schema: { $ref: '#/components/schemas/HistoryEnvelope' } } } }
+          '200': { description: Compatibility close-price points projected from validated Birdeye USD candles, or null when unavailable., content: { application/json: { schema: { $ref: '#/components/schemas/HistoryEnvelope' } } } }
+  /v3/assets/mint/{mint}/candles:
+    get:
+      parameters:
+        - { in: path, name: mint, required: true, schema: { type: string } }
+        - { in: query, name: range, schema: { type: string, enum: [1h, 4h, 1d, 7d], default: 1d } }
+      responses:
+        '200': { description: Birdeye USD OHLCV candles for the requested token-market lookback, content: { application/json: { schema: { $ref: '#/components/schemas/CandlesEnvelope' } } } }
   /v3/wallets/{address}:
     get:
       parameters: [{ in: path, name: address, required: true, schema: { type: string } }]
@@ -178,6 +187,22 @@ components:
       properties:
         timestamp: { type: string, format: date-time }
         priceUsd: { type: number }
+    CandlesEnvelope:
+      allOf:
+        - { $ref: '#/components/schemas/Envelope' }
+        - type: object
+          properties: { data: { type: object, properties: { mint: { type: string }, range: { type: string }, interval: { type: string }, candles: { type: [array, 'null'], items: { $ref: '#/components/schemas/Candle' } } } } }
+    Candle:
+      type: object
+      required: [timestamp, openUsd, highUsd, lowUsd, closeUsd, volume, volumeUsd]
+      properties:
+        timestamp: { type: string, format: date-time }
+        openUsd: { type: number }
+        highUsd: { type: number }
+        lowUsd: { type: number }
+        closeUsd: { type: number }
+        volume: { type: number, description: Provider-reported token volume. }
+        volumeUsd: { type: number, description: Provider-reported USD volume. }
     WalletEnvelope:
       allOf:
         - { $ref: '#/components/schemas/Envelope' }

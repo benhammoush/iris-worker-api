@@ -1,41 +1,48 @@
-import { API_VERSION, FRESH_AFTER_MS, HISTORY_KEY_PREFIX, REFRESH_INTERVAL_MINUTES, REFRESH_INTERVAL_MS, STALE_AFTER_MS, V3_HISTORY_KEY_PREFIX } from './constants.js';
+import { API_VERSION, CANDLE_KEY_PREFIX, FRESH_AFTER_MS, REFRESH_INTERVAL_MINUTES, REFRESH_INTERVAL_MS, STALE_AFTER_MS } from './constants.js';
 import { error, json } from './http.js';
-import { fetchPriceHistory, mapV3Asset, tokenByMint } from './market.js';
+import { candlePlan, fetchCandles, mapV3Asset, tokenByMint } from './market.js';
 import { isUsableSnapshot, loadWalletData, resolveSnapshot } from './snapshot.js';
 import { isBase58PublicKey } from './transforms.js';
 import { loadV3Events, loadV3Wallet, mapV3HistoryPoints, v3Asset } from './v3.js';
 import { loadHeliusDashboardSample } from './recentTransactions.js';
 import { loadDefiLlamaDashboard } from './defillama.js';
 
-function usableHistory(history) {
-  return history && typeof history === 'object' && Number.isFinite(Date.parse(history.fetchedAt)) && Array.isArray(history.points);
+function usableCandles(history) {
+  return history && typeof history === 'object' && Number.isFinite(Date.parse(history.fetchedAt)) && Array.isArray(history.candles);
 }
 
-export async function historyForAsset(kv, mint, apiKey, keyPrefix = HISTORY_KEY_PREFIX, range = '7d') {
-  const key = `${keyPrefix}${mint}:${range}`;
+export async function candlesForAsset(kv, mint, apiKey, range = '7d') {
+  const plan = candlePlan(range);
+  if (!plan) throw new Error('Unsupported candle range.');
+  const key = `${CANDLE_KEY_PREFIX}${mint}:${range}:${plan.interval}:usd`;
   const cached = kv ? await kv.get(key, 'json') : null;
-  const cachedUsable = usableHistory(cached) || (cached?.unavailable === true && Number.isFinite(Date.parse(cached.fetchedAt)));
+  const cachedUsable = usableCandles(cached) || (cached?.unavailable === true && Number.isFinite(Date.parse(cached.fetchedAt)));
   const age = cachedUsable ? Date.now() - Date.parse(cached.fetchedAt) : Infinity;
-  if (age >= 0 && age <= FRESH_AFTER_MS) return { points: cached.unavailable ? null : cached.points, state: cached.unavailable ? 'unavailable' : 'fresh', fetchedAt: cached.fetchedAt };
+  if (age >= 0 && age <= FRESH_AFTER_MS) return { candles: cached.unavailable ? null : cached.candles, interval: plan.interval, state: cached.unavailable ? 'unavailable' : 'fresh', fetchedAt: cached.fetchedAt, source: 'birdeye' };
   try {
-    const points = await fetchPriceHistory(mint, apiKey, range);
-    if (!points) {
-      if (age >= 0 && age <= STALE_AFTER_MS && usableHistory(cached)) return { points: cached.points, state: 'stale', fetchedAt: cached.fetchedAt };
+    const result = await fetchCandles(mint, apiKey, range);
+    if (!result) {
+      if (age >= 0 && age <= STALE_AFTER_MS && usableCandles(cached)) return { candles: cached.candles, interval: cached.interval || plan.interval, state: 'stale', fetchedAt: cached.fetchedAt, source: 'birdeye' };
       const fetchedAt = new Date().toISOString();
-      if (kv?.put) await kv.put(key, JSON.stringify({ version: 1, mint, source: 'coingecko', fetchedAt, unavailable: true }));
-      return { points: null, state: 'unavailable', fetchedAt };
+      if (kv?.put) await kv.put(key, JSON.stringify({ version: 1, mint, source: 'birdeye', interval: plan.interval, fetchedAt, unavailable: true }));
+      return { candles: null, interval: plan.interval, state: 'unavailable', fetchedAt, source: 'birdeye' };
     }
     const fetchedAt = new Date().toISOString();
-    if (kv?.put) await kv.put(key, JSON.stringify({ version: 1, mint, source: 'coingecko', fetchedAt, points }));
-    return { points, state: 'fresh', fetchedAt };
+    if (kv?.put) await kv.put(key, JSON.stringify({ version: 1, mint, source: 'birdeye', interval: result.interval, fetchedAt, candles: result.candles }));
+    return { candles: result.candles, interval: result.interval, state: 'fresh', fetchedAt, source: 'birdeye' };
   } catch (cause) {
-    console.warn('CoinGecko history unavailable', { mint, message: cause.message });
-    return age >= 0 && age <= STALE_AFTER_MS ? { points: cached.points, state: 'stale', fetchedAt: cached.fetchedAt } : { points: null, state: 'unavailable', fetchedAt: null };
+    console.warn('Birdeye candles unavailable', { mint, message: cause.message });
+    return age >= 0 && age <= STALE_AFTER_MS && usableCandles(cached) ? { candles: cached.candles, interval: cached.interval || plan.interval, state: 'stale', fetchedAt: cached.fetchedAt, source: 'birdeye' } : { candles: null, interval: plan.interval, state: 'unavailable', fetchedAt: null, source: 'birdeye' };
   }
 }
 
+export async function historyForAsset(kv, mint, apiKey, range = '7d') {
+  const history = await candlesForAsset(kv, mint, apiKey, range);
+  return { ...history, points: history.candles?.map((candle) => ({ date: candle.timestamp, price: candle.closeUsd })) || null };
+}
+
 function v3Meta(meta, history = null) {
-  return { ...meta, provenance: { snapshot: meta.snapshotState, market: meta.marketDataSource, history: history?.points ? 'coingecko' : null }, freshness: { snapshot: meta.snapshotState, history: history?.state ?? null, historyFetchedAt: history?.fetchedAt ?? null } };
+  return { ...meta, provenance: { snapshot: meta.snapshotState, market: meta.marketDataSource, history: history?.points || history?.candles ? history.source : null }, freshness: { snapshot: meta.snapshotState, history: history?.state ?? null, historyFetchedAt: history?.fetchedAt ?? null } };
 }
 
 function v3Swap(swap) {
@@ -89,7 +96,8 @@ export async function route(request, env, config, id, origin) {
   if (url.pathname.startsWith('/v3/assets/mint/')) {
     const suffix = url.pathname.slice('/v3/assets/mint/'.length);
     const historySuffix = suffix.endsWith('/history');
-    const encodedMint = historySuffix ? suffix.slice(0, -'/history'.length) : suffix;
+    const candleSuffix = suffix.endsWith('/candles');
+    const encodedMint = historySuffix ? suffix.slice(0, -'/history'.length) : candleSuffix ? suffix.slice(0, -'/candles'.length) : suffix;
     let mint;
     try { mint = decodeURIComponent(encodedMint); } catch { return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin); }
     if (!mint || mint.includes('/') || !isBase58PublicKey(mint)) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
@@ -106,9 +114,13 @@ export async function route(request, env, config, id, origin) {
       }
     }
     const range = url.searchParams.get('range') || '7d';
-    if (range !== '1d' && range !== '7d') return error('INVALID_HISTORY_RANGE', 'range must be 1d or 7d.', 400, id, origin);
-    const history = await historyForAsset(env.SNAPSHOTS, mint, config.coingeckoApiKey, V3_HISTORY_KEY_PREFIX, range);
+    const allowedRanges = candleSuffix ? ['1h', '4h', '1d', '7d'] : ['1d', '7d'];
+    if (!allowedRanges.includes(range)) return error('INVALID_HISTORY_RANGE', `range must be ${candleSuffix ? '1h, 4h, 1d, or 7d' : '1d or 7d'}.`, 400, id, origin);
+    const includeHistory = url.searchParams.get('includeHistory') !== 'false';
+    if (!historySuffix && !candleSuffix && !includeHistory) return json({ data: v3Asset(asset), meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
+    const history = await historyForAsset(env.SNAPSHOTS, mint, config.birdeyeApiKey, range);
     const points = mapV3HistoryPoints(history.points);
+    if (candleSuffix) return json({ data: { mint, range, interval: history.interval, candles: history.candles }, meta: v3Meta(meta, history) }, 200, id, origin, snapshotHeaders);
     if (historySuffix) return json({ data: { mint, range, points }, meta: v3Meta(meta, history) }, 200, id, origin, snapshotHeaders);
     return json({ data: { ...v3Asset(asset), history: { points, state: state === 'fixture' ? 'fixture' : history.state, fetchedAt: history.fetchedAt } }, meta: v3Meta(meta, history) }, 200, id, origin, snapshotHeaders);
   }
@@ -145,8 +157,8 @@ export async function route(request, env, config, id, origin) {
     if (!isBase58PublicKey(mint)) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
     const asset = snapshot.assets.find((item) => item.mint === mint);
     if (!asset) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
-    const history = await historyForAsset(env.SNAPSHOTS, mint, config.coingeckoApiKey);
-    return json({ data: { ...asset, priceHistory: history.points, historyDataSource: history.points ? 'coingecko' : null }, meta: { ...meta, historyDataSource: history.points ? 'coingecko' : null, historyState: state === 'fixture' ? 'fixture' : history.state, historyFetchedAt: history.fetchedAt } }, 200, id, origin, snapshotHeaders);
+    const history = await historyForAsset(env.SNAPSHOTS, mint, config.birdeyeApiKey);
+    return json({ data: { ...asset, priceHistory: history.points, historyDataSource: history.points ? 'birdeye' : null }, meta: { ...meta, historyDataSource: history.points ? 'birdeye' : null, historyState: state === 'fixture' ? 'fixture' : history.state, historyFetchedAt: history.fetchedAt } }, 200, id, origin, snapshotHeaders);
   }
   if (url.pathname.startsWith(`${versionPrefix}/assets/`)) {
     const assetPath = url.pathname.slice(`${versionPrefix}/assets/`.length);

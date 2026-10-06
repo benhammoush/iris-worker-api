@@ -2,7 +2,7 @@ import { MAX_CATALOG_ASSETS, MIN_RECENT_CATALOG_VOLUME_USD, SOL_MINT } from './c
 import { assetIdentity } from './transforms.js';
 
 const JUPITER = 'https://api.jup.ag';
-const COINGECKO = 'https://api.coingecko.com/api/v3';
+const BIRDEYE = 'https://public-api.birdeye.so';
 
 async function fetchJson(url, apiKey, provider) {
   const response = await fetch(url, { headers: apiKey ? { 'x-api-key': apiKey } : undefined, signal: AbortSignal.timeout(10_000) });
@@ -130,14 +130,54 @@ export async function refreshDiscoveryCatalogs(apiKey) {
   return { trending, recent };
 }
 
-export async function fetchPriceHistory(mint, apiKey, range = '7d') {
+const candlePlans = {
+  '1h': { interval: '1m', durationMs: 60 * 60 * 1000 },
+  '4h': { interval: '5m', durationMs: 4 * 60 * 60 * 1000 },
+  '1d': { interval: '15m', durationMs: 24 * 60 * 60 * 1000 },
+  '7d': { interval: '1H', durationMs: 7 * 24 * 60 * 60 * 1000 }
+};
+
+export function candlePlan(range) {
+  return candlePlans[range] || null;
+}
+
+function finite(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function birdeyeCandle(item) {
+  const unixTime = item?.unix_time;
+  const openUsd = finite(item?.o);
+  const highUsd = finite(item?.h);
+  const lowUsd = finite(item?.l);
+  const closeUsd = finite(item?.c);
+  const volume = finite(item?.v);
+  const volumeUsd = finite(item?.v_usd);
+  if (!Number.isInteger(unixTime) || unixTime < 0 || openUsd === null || highUsd === null || lowUsd === null || closeUsd === null || volume === null || volumeUsd === null) return null;
+  if (highUsd < openUsd || highUsd < closeUsd || lowUsd > openUsd || lowUsd > closeUsd) return null;
+  return { timestamp: new Date(unixTime * 1000).toISOString(), openUsd, highUsd, lowUsd, closeUsd, volume, volumeUsd };
+}
+
+export async function fetchCandles(mint, apiKey, range = '7d', now = Date.now()) {
   if (!apiKey) return null;
-  const days = range === '1d' ? 1 : range === '7d' ? 7 : null;
-  if (!days) throw new Error('Unsupported price-history range.');
-  const response = await fetch(`${COINGECKO}/coins/solana/contract/${encodeURIComponent(mint)}/market_chart?vs_currency=usd&days=${days}`, { headers: { 'x-cg-demo-api-key': apiKey }, signal: AbortSignal.timeout(10_000) });
-  if (!response.ok) throw new Error(`CoinGecko request failed with ${response.status}`);
+  const plan = candlePlan(range);
+  if (!plan) throw new Error('Unsupported candle range.');
+  const timeTo = Math.floor(now / 1000);
+  const query = new URLSearchParams({ address: mint, type: plan.interval, time_from: String(timeTo - Math.floor(plan.durationMs / 1000)), time_to: String(timeTo), mode: 'range', currency: 'usd', chart_type: 'price' });
+  const response = await fetch(`${BIRDEYE}/defi/v3/ohlcv?${query}`, { headers: { 'X-API-KEY': apiKey, 'x-chain': 'solana', accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error(`Birdeye request failed with ${response.status}`);
   const payload = await response.json();
-  if (!Array.isArray(payload?.prices)) return null;
-  const points = payload.prices.map(([timestamp, price]) => ({ date: new Date(timestamp).toISOString(), price })).filter((point) => Number.isFinite(Date.parse(point.date)) && Number.isFinite(point.price));
-  return points.length ? points : null;
+  if (payload?.success !== true || !Array.isArray(payload?.data?.items)) return null;
+  const byTimestamp = new Map();
+  for (const item of payload.data.items) {
+    const candle = birdeyeCandle(item);
+    if (candle) byTimestamp.set(candle.timestamp, candle);
+  }
+  const candles = [...byTimestamp.values()].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+  return candles.length ? { interval: plan.interval, candles } : null;
+}
+
+export async function fetchPriceHistory(mint, apiKey, range = '7d') {
+  const result = await fetchCandles(mint, apiKey, range);
+  return result?.candles.map((candle) => ({ date: candle.timestamp, price: candle.closeUsd })) || null;
 }

@@ -1,39 +1,35 @@
 # Iris API
 
-Cloudflare Worker API for cached Solana market data and on-demand public wallet lookups. It is native JavaScript and uses Cloudflare KV only; it does not use Express, D1, or R2.
+Cloudflare Worker API for cached Solana market data and on-demand public-wallet lookups. It is native JavaScript and uses Cloudflare KV only; it does not use Express, D1, or R2.
 
 ## Local development
 
 1. Run `npm install`.
 2. Copy `.dev.vars.example` to `.dev.vars` and set only local values. Do not commit `.dev.vars`.
 3. Create the KV namespaces and replace the placeholder namespace IDs in `wrangler.toml` before deploying.
-4. Set `HELIUS_API_KEY`, `JUPITER_API_KEY`, and `COINGECKO_DEMO_API_KEY` in `.dev.vars` for live data and on-demand history. Never commit secrets or private wallet information.
+4. Set `HELIUS_API_KEY`, `JUPITER_API_KEY`, and `BIRDEYE_API_KEY` for live data and on-demand USD OHLCV candles. Never commit secrets or private wallet information.
 5. Run `npm run dev` or `npm test`.
 
 Any valid public Solana address can be looked up; Iris never requests wallet signing or private keys.
 
 ## Deployment
 
-Pushes to `main` automatically deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret. Create a least-privilege Cloudflare token that can deploy Workers for the account hosting `iris-api`; its value is never stored in this repository. Set `HELIUS_API_KEY` and `JUPITER_API_KEY` as Worker secrets. The deploy job invokes the protected `/internal/refresh` endpoint immediately after deployment using the high-entropy `IRIS_REFRESH_TOKEN` GitHub secret, which must match the Worker `REFRESH_TOKEN` secret. If required Jupiter catalog discovery fails, refresh preserves the last complete snapshot instead of publishing partial data.
+Pushes to `main` automatically deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret. Set `HELIUS_API_KEY`, `JUPITER_API_KEY`, and `BIRDEYE_API_KEY` as Worker secrets. The deploy job invokes the protected `/internal/refresh` endpoint using the `IRIS_REFRESH_TOKEN` GitHub secret, which must match the Worker `REFRESH_TOKEN` secret.
+
+## Market data
+
+Jupiter supplies token metadata, current prices, provider-reported market cap and supply, liquidity, and 24-hour activity. Birdeye supplies on-demand USD token-market OHLCV candles. The Worker requests `1m`, `5m`, `15m`, and `1H` intervals for the `1H`, `4H`, `1D`, and `7D` chart lookbacks respectively. Candles are cached for 30 minutes and may be served stale for 24 hours; unavailable data remains null rather than fabricated.
+
+`GET /v3/assets/mint/:mint/candles?range=1h|4h|1d|7d` returns validated USD OHLCV candles. `GET /v3/assets/mint/:mint/history?range=1d|7d` remains a compatibility route and projects each candle's USD close to `{ timestamp, priceUsd }`. The asset route accepts `includeHistory=false` to avoid loading compatibility history with its metadata.
+
+Birdeye token candles are provider-defined market aggregation and are not a selected Raydium pool. The browser never calls Birdeye directly or receives the API key.
 
 ## Snapshot behavior
 
-The production Cron runs every minute. Every run refreshes the cached recent-transaction sample with a confirmed-slot signatures-only block plus one Helius Parsed Events batch. Requests made after the sample is 15 seconds old also refresh it, coalesced per Worker isolate; the Cron remains the no-traffic backstop. Every fifteenth minute it also refreshes the complete market/network snapshot and a separate DefiLlama dashboard cache. SOL is included even when it is unranked; provider order is preserved after exact-mint deduplication and the catalog is capped at 50 assets. A complete versioned snapshot is written to KV before its pointer is published, so readers never receive a partial refresh.
-
-With `HELIUS_API_KEY`, `JUPITER_API_KEY`, and `COINGECKO_DEMO_API_KEY` configured, Iris identifies assets by mint address, not symbol. Jupiter supplies metadata, icons, current prices, provider-reported market cap and supply, and 24-hour change; Iris does not calculate market cap. CoinGecko supplies seven-day daily price history on demand for supported mints through the mint-detail route and caches it for 30 minutes, serving stale cache through 24 hours when refresh fails. Tokens not indexed by CoinGecko return `null` history. Missing values are `null`, never a fabricated zero. The bundled data in `src/fixtures.js` is an explicitly labeled outage fallback, not live pricing.
-
-Responses are JSON envelopes with `meta.requestId`; errors use `error.code`. Snapshot responses include `snapshotCreatedAt`, `refreshIntervalMinutes`, and `nextScheduledRefreshAt` (the next UTC cron boundary), plus `X-Snapshot-State`, and are `Cache-Control: no-store`. The resolver serves fresh data for up to 30 minutes, stale data for more than 30 minutes through 24 hours, then the bundled fixture snapshot.
+The production Cron runs every minute. Every run refreshes the cached recent-transaction sample. Every fifteenth minute it also refreshes the complete Jupiter/Helius snapshot and a separate DefiLlama dashboard cache. A complete versioned snapshot is written to KV before its pointer is published, so readers never receive a partial refresh.
 
 ## API versions
 
-`/v3` is the canonical contract. It exposes Jupiter Tokens V2 fields without v2 aliases, CoinGecko history as canonical `{ timestamp, priceUsd }` daily points, registry-scoped reviewed swaps, and DAS wallet balances. Wallet responses contain `balances`, `holdingsTruncated`, and `valuation` with a finite-priced subtotal and coverage counts. If Jupiter wallet enrichment is unavailable after a successful DAS lookup, DAS balances are returned with fallback metadata and null prices and values, so valuation coverage reports every holding as unpriced. They are cached in KV for 60 seconds; `meta.wallet` reports cache freshness and its `asOf` timestamp. Atomic quantities remain strings and enriched holdings are capped at 40. `/v3/wallets/:address/transactions` calls Helius Parsed Events transaction history with `limit=25` by default, `limit=100` maximum, and its opaque `paginationToken` exposed as `cursor`/`nextCursor`. Events expose `transfers.native` and `transfers.tokens`; digit-string atomic values are retained unchanged and unsafe provider numbers are null rather than precision-loss conversions. `/v3/transactions/recent?limit=10..20` is a sampled feed and Home Helius dashboard summary refreshed on demand at most once per 15 seconds while it has traffic, with the one-minute Cron as a backstop. It uses a signatures-only confirmed block and an optional Helius Parsed Events batch to return `signature`, `blockTime`, `slot`, and nullable `action`, plus processed/confirmed slots, block height, epoch, weighted TPS, non-vote TPS, and average paid fee; parser failure leaves actions unknown but does not prevent a fresh block sample. `/v3/defillama` returns all available Solana DEX rows and all DefiLlama protocols that explicitly include `Solana` in `chains` and have finite `chainTvls.Solana`, ranked by their provider-reported Solana TVL. Rows include provider logos. It uses DefiLlama's free API, requires no credential, is fresh for 15 minutes, and may be served stale for 24 hours; it is not an inventory or ranking of all Solana programs. Each network metric group preserves stale data for up to 24 hours when refresh fails. It is not a complete chain-wide transaction feed. The previous `/events` spelling remains a transitional alias only. History is fresh for 30 minutes and may be served stale for 24 hours; unavailable CoinGecko lookups are negatively cached.
+`/v3` is the canonical contract. It exposes Jupiter asset fields, Birdeye candles, compatibility history points, reviewed-pool swaps, and DAS wallet balances. `/v2` and `/v1` remain transitional aliases during frontend migration.
 
-`/v2` and transitional `/v1` routes retain their existing response shapes during migration. Clients should move to `/v3`; v3 has no symbol or legacy identifier aliases.
-
-## Endpoints
-
-`GET /health`, `GET /ready`, `GET /v2/status`, `GET /v2/market`, `GET /v2/assets`, `GET /v2/assets/mint/:mint`, `GET /v2/assets/:symbol`, `GET /v2/swaps`, `GET /v2/wallets`, and `GET /v2/wallets/:address`. The previous `/v1` routes remain transitional aliases.
-
-`/v2/wallets` has no featured-address list. `/v2/wallets/:address` accepts any valid public Solana address and returns live Helius balances, `totalValue`, and decoded activity; atomic quantities remain strings. `/v2/swaps` reads decoded activity only for the reviewed pool registry and is explicitly not chain-wide. `/v2/status` reports swap scope and count. Asset detail lookup uses `/v2/assets/mint/:mint`; symbol lookup remains only for unique symbols. See `openapi.yaml` for the API contract. Browser CORS is limited to comma-separated `CORS_ORIGINS` values.
-
-Canonical v3 routes are `GET /v3/status`, `GET /v3/assets`, `GET /v3/assets/:mint`, `GET /v3/assets/:mint/history`, `GET /v3/swaps`, `GET /v3/defillama`, `GET /v3/transactions/recent`, `GET /v3/wallets/:address`, and `GET /v3/wallets/:address/transactions`.
+Responses are JSON envelopes with `meta.requestId`; errors use `error.code`. Snapshot responses include freshness metadata and are `Cache-Control: no-store`. See `openapi.yaml` for the API contract.

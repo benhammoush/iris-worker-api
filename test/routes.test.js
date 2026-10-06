@@ -26,10 +26,10 @@ test('protected refresh publishes the snapshot when the optional dashboard cache
 
 test('v2 is canonical and v1 remains an asset route alias', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ prices: [[1_760_000_000_000, 150]] }) });
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ success: true, data: { items: [{ unix_time: 1_760_000_000, o: 149, h: 151, l: 148, c: 150, v: 1, v_usd: 150 }] } }) });
   try {
-    const v2 = await worker.fetch(new Request('https://api.example/v2/assets/mint/' + SOL_MINT), env({ COINGECKO_DEMO_API_KEY: 'demo-key' }), {});
-    const v1 = await worker.fetch(new Request('https://api.example/v1/assets/id/' + SOL_MINT), env({ COINGECKO_DEMO_API_KEY: 'demo-key' }), {});
+    const v2 = await worker.fetch(new Request('https://api.example/v2/assets/mint/' + SOL_MINT), env({ BIRDEYE_API_KEY: 'birdeye-key' }), {});
+    const v1 = await worker.fetch(new Request('https://api.example/v1/assets/id/' + SOL_MINT), env({ BIRDEYE_API_KEY: 'birdeye-key' }), {});
     const asset = (await v2.json()).data;
     assert.equal(v2.status, 200); assert.equal(v1.status, 200);
     assert.equal(asset.chain, 'solana'); assert.equal(asset.mint, SOL_MINT); assert.equal(asset.contractId, SOL_MINT);

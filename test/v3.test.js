@@ -23,14 +23,16 @@ test('v3 history points use timestamp and priceUsd without changing v2 cache poi
   assert.equal(mapV3HistoryPoints(null), null);
 });
 
-test('v3 canonical mint routes return range-aware canonical history points', async () => {
+test('v3 canonical mint routes return range-aware Birdeye close-price history and OHLCV candles', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ prices: [[1_760_000_000_000, 150]] }) });
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ success: true, data: { items: [{ unix_time: 1_760_000_000, o: 149, h: 151, l: 148, c: 150, v: 1, v_usd: 150 }] } }) });
   try {
-    const history = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/history?range=1d`), env({ COINGECKO_DEMO_API_KEY: 'key' }), {});
-    const detail = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}`), env({ COINGECKO_DEMO_API_KEY: 'key' }), {});
+    const history = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/history?range=1d`), env({ BIRDEYE_API_KEY: 'key' }), {});
+    const candles = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/candles?range=1d`), env({ BIRDEYE_API_KEY: 'key' }), {});
+    const detail = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}`), env({ BIRDEYE_API_KEY: 'key' }), {});
     const historyPoint = (await history.json()).data.points[0]; const detailPoint = (await detail.json()).data.history.points[0];
     assert.deepEqual(historyPoint, { timestamp: '2025-10-09T08:53:20.000Z', priceUsd: 150 }); assert.deepEqual(detailPoint, historyPoint);
+    assert.equal((await candles.json()).data.candles[0].volumeUsd, 150);
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -39,9 +41,9 @@ test('v3 resolves a valid mint outside the snapshot through Jupiter', async () =
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url) => String(url).includes('/tokens/v2/search')
     ? { ok: true, json: async () => [{ id: mint, symbol: 'JUP', name: 'Jupiter', decimals: 6, isVerified: true, usdPrice: 1 }] }
-    : { ok: true, json: async () => ({ prices: [[1_760_000_000_000, 1]] }) };
+    : { ok: true, json: async () => ({ success: true, data: { items: [{ unix_time: 1_760_000_000, o: 1, h: 1, l: 1, c: 1, v: 1, v_usd: 1 }] } }) };
   try {
-    const response = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${mint}`), env({ COINGECKO_DEMO_API_KEY: 'key', JUPITER_API_KEY: 'key' }), {});
+    const response = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${mint}`), env({ BIRDEYE_API_KEY: 'key', JUPITER_API_KEY: 'key' }), {});
     const body = await response.json();
     assert.equal(response.status, 200); assert.equal(body.data.mint, mint); assert.equal(body.data.symbol, 'JUP');
   } finally { globalThis.fetch = originalFetch; }
@@ -58,23 +60,23 @@ test('v3 Parsed Events mapping preserves string raw amounts and rejects unsafe n
   assert.equal(event.transfers.tokens[0].atomicAmount, '2500000'); assert.equal(event.transfers.tokens[0].decimals, 6); assert.equal(event.transfers.tokens[1].atomicAmount, '7');
 });
 
-test('v3 history negative-caches unavailable CoinGecko responses', async () => {
+test('v3 history negative-caches unavailable Birdeye responses', async () => {
   const values = new Map(); let calls = 0;
   const kv = { get: async (key) => values.get(key) || null, put: async (key, value) => values.set(key, JSON.parse(value)) };
-  const originalFetch = globalThis.fetch; globalThis.fetch = async () => { calls += 1; return { ok: true, json: async () => ({ prices: [] }) }; };
+  const originalFetch = globalThis.fetch; globalThis.fetch = async () => { calls += 1; return { ok: true, json: async () => ({ success: true, data: { items: [] } }) }; };
   try {
-    assert.equal((await historyForAsset(kv, SOL_MINT, 'key', 'test:')).state, 'unavailable');
-    assert.equal((await historyForAsset(kv, SOL_MINT, 'key', 'test:')).state, 'unavailable');
+    assert.equal((await historyForAsset(kv, SOL_MINT, 'key')).state, 'unavailable');
+    assert.equal((await historyForAsset(kv, SOL_MINT, 'key')).state, 'unavailable');
     assert.equal(calls, 1);
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test('v3 history preserves a stale seven-day cache when CoinGecko reports unavailable', async () => {
-  const cached = { fetchedAt: new Date(Date.now() - (31 * 60 * 1000)).toISOString(), points: [{ date: '2026-10-01T00:00:00.000Z', price: 1 }] };
-  const originalFetch = globalThis.fetch; globalThis.fetch = async () => ({ ok: true, json: async () => ({ prices: [] }) });
+test('v3 history preserves a stale seven-day Birdeye candle cache when the provider reports unavailable', async () => {
+  const cached = { fetchedAt: new Date(Date.now() - (31 * 60 * 1000)).toISOString(), interval: '1H', candles: [{ timestamp: '2026-10-01T00:00:00.000Z', openUsd: 1, highUsd: 1, lowUsd: 1, closeUsd: 1, volume: 1, volumeUsd: 1 }] };
+  const originalFetch = globalThis.fetch; globalThis.fetch = async () => ({ ok: true, json: async () => ({ success: true, data: { items: [] } }) });
   try {
-    const history = await historyForAsset({ get: async () => cached }, SOL_MINT, 'key', 'test:');
-    assert.equal(history.state, 'stale'); assert.deepEqual(history.points, cached.points);
+    const history = await historyForAsset({ get: async () => cached }, SOL_MINT, 'key');
+    assert.equal(history.state, 'stale'); assert.deepEqual(history.points, [{ date: '2026-10-01T00:00:00.000Z', price: 1 }]);
   } finally { globalThis.fetch = originalFetch; }
 });
 
