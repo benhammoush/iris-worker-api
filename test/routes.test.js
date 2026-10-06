@@ -16,6 +16,14 @@ test('protected refresh rejects requests without its token', async () => {
   assert.equal(response.status, 401); assert.equal((await response.json()).error.code, 'REFRESH_UNAUTHORIZED');
 });
 
+test('protected refresh publishes the snapshot when the optional dashboard cache is unavailable', async () => {
+  const originalWarn = console.warn; console.warn = () => {};
+  try {
+    const response = await worker.fetch(new Request('https://api.example/internal/refresh', { method: 'POST', headers: { authorization: 'Bearer expected' } }), env({ REFRESH_TOKEN: 'expected' }), {});
+    assert.equal(response.status, 200); assert.equal((await response.json()).data.status, 'refreshed');
+  } finally { console.warn = originalWarn; }
+});
+
 test('v2 is canonical and v1 remains an asset route alias', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ prices: [[1_760_000_000_000, 150]] }) });
