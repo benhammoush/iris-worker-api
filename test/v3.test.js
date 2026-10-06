@@ -25,14 +25,16 @@ test('v3 history points use timestamp and priceUsd without changing v2 cache poi
 
 test('v3 canonical mint routes return range-aware Birdeye close-price history and OHLCV candles', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ success: true, data: { items: [{ unix_time: 1_760_000_000, o: 149, h: 151, l: 148, c: 150, v: 1, v_usd: 150 }] } }) });
+  const timestamp = Math.floor(Date.now() / 1000);
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ success: true, data: { items: [{ unix_time: timestamp, o: 149, h: 151, l: 148, c: 150, v: 1, v_usd: 150 }] } }) });
   try {
     const history = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/history?range=1d`), env({ BIRDEYE_API_KEY: 'key' }), {});
-    const candles = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/candles?range=1d`), env({ BIRDEYE_API_KEY: 'key' }), {});
+    const candles = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/candles?timeframe=1D`), env({ BIRDEYE_API_KEY: 'key' }), {});
     const detail = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}`), env({ BIRDEYE_API_KEY: 'key' }), {});
     const historyPoint = (await history.json()).data.points[0]; const detailPoint = (await detail.json()).data.history.points[0];
-    assert.deepEqual(historyPoint, { timestamp: '2025-10-09T08:53:20.000Z', priceUsd: 150 }); assert.deepEqual(detailPoint, historyPoint);
-    assert.equal((await candles.json()).data.candles[0].volumeUsd, 150);
+    assert.deepEqual(historyPoint, { timestamp: new Date(timestamp * 1000).toISOString(), priceUsd: 150 }); assert.deepEqual(detailPoint, historyPoint);
+    const candleBody = await candles.json();
+    assert.equal(candleBody.data.timeframe, '1D'); assert.equal(candleBody.data.count, 300); assert.equal(candleBody.data.candles[0].volumeUsd, 150);
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -44,13 +46,17 @@ test('v3 candle pagination requests the preceding provider window and rejects in
     return { ok: true, json: async () => ({ success: true, data: { items: [{ unix_time: 1_760_000_000, o: 149, h: 151, l: 148, c: 150, v: 1, v_usd: 150 }] } }) };
   };
   try {
-    const response = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/candles?range=1h&before=1760000000`), env({ BIRDEYE_API_KEY: 'key' }), {});
+    const response = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/candles?timeframe=1H&before=1760000000`), env({ BIRDEYE_API_KEY: 'key' }), {});
     assert.equal(response.status, 200);
-    assert.match(requestUrl, /type=1m/);
+    assert.match(requestUrl, /type=1H/);
+    assert.match(requestUrl, /count_limit=300/);
     assert.match(requestUrl, /time_to=1760000000/);
     const invalid = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/candles?before=invalid`), env({ BIRDEYE_API_KEY: 'key' }), {});
     assert.equal(invalid.status, 400);
     assert.equal((await invalid.json()).error.code, 'INVALID_CANDLE_BEFORE');
+    const invalidTimeframe = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/candles?timeframe=1h`), env({ BIRDEYE_API_KEY: 'key' }), {});
+    assert.equal(invalidTimeframe.status, 400);
+    assert.equal((await invalidTimeframe.json()).error.code, 'INVALID_CANDLE_TIMEFRAME');
   } finally { globalThis.fetch = originalFetch; }
 });
 

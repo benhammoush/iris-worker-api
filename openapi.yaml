@@ -98,10 +98,10 @@ paths:
     get:
       parameters:
         - { in: path, name: mint, required: true, schema: { type: string } }
-        - { in: query, name: range, schema: { type: string, enum: [1h, 4h, 1d, 7d], default: 1d } }
+        - { in: query, name: timeframe, description: Exact-case native Birdeye candle duration., schema: { type: string, enum: [1s, 15s, 30s, 1m, 3m, 5m, 15m, 30m, 1H, 2H, 4H, 6H, 8H, 12H, 1D, 3D, 1W, 1M], default: 1H } }
         - { in: query, name: before, description: Exclusive-end Unix timestamp in seconds for the preceding candle window., schema: { type: integer, minimum: 1 } }
       responses:
-        '200': { description: Birdeye USD OHLCV candles for the requested token-market lookback, content: { application/json: { schema: { $ref: '#/components/schemas/CandlesEnvelope' } } } }
+        '200': { description: One fixed page of 300 Birdeye USD OHLCV candles for the requested duration, content: { application/json: { schema: { $ref: '#/components/schemas/CandlesEnvelope' } } } }
   /v3/wallets/{address}:
     get:
       parameters: [{ in: path, name: address, required: true, schema: { type: string } }]
@@ -192,7 +192,7 @@ components:
       allOf:
         - { $ref: '#/components/schemas/Envelope' }
         - type: object
-          properties: { data: { type: object, properties: { mint: { type: string }, range: { type: string }, interval: { type: string }, candles: { type: [array, 'null'], items: { $ref: '#/components/schemas/Candle' } } } } }
+          properties: { data: { type: object, properties: { mint: { type: string }, timeframe: { type: string }, count: { type: integer, const: 300 }, candles: { type: [array, 'null'], items: { $ref: '#/components/schemas/Candle' } } } } }
     Candle:
       type: object
       required: [timestamp, openUsd, highUsd, lowUsd, closeUsd, volume, volumeUsd]

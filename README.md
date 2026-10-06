@@ -18,9 +18,9 @@ Pushes to `main` automatically deploy to Cloudflare after CI passes when the rep
 
 ## Market data
 
-Jupiter supplies token metadata, current prices, provider-reported market cap and supply, liquidity, and 24-hour activity. Birdeye supplies on-demand USD token-market OHLCV candles. The Worker requests `1m`, `5m`, `15m`, and `1H` intervals for the `1H`, `4H`, `1D`, and `7D` chart lookbacks respectively. Candles are cached for 30 minutes and may be served stale for 24 hours; unavailable data remains null rather than fabricated.
+Jupiter supplies token metadata, current prices, provider-reported market cap and supply, liquidity, and 24-hour activity. Birdeye supplies on-demand USD token-market OHLCV candles. The Worker supports Birdeye's exact native `1s`, `15s`, `30s`, `1m`, `3m`, `5m`, `15m`, `30m`, `1H`, `2H`, `4H`, `6H`, `8H`, `12H`, `1D`, `3D`, `1W`, and `1M` durations. Candles are cached for 30 minutes and may be served stale for 24 hours; unavailable data remains null rather than fabricated.
 
-`GET /v3/assets/mint/:mint/candles?range=1h|4h|1d|7d` returns validated USD OHLCV candles. Its optional `before=<unix-seconds>` query loads the preceding same-size window for backward chart pagination. `GET /v3/assets/mint/:mint/history?range=1d|7d` remains a compatibility route and projects each candle's USD close to `{ timestamp, priceUsd }`. The asset route accepts `includeHistory=false` to avoid loading compatibility history with its metadata.
+`GET /v3/assets/mint/:mint/candles?timeframe=<native-Birdeye-type>` returns one validated 300-candle USD OHLCV page. Its optional `before=<unix-seconds>` query loads the preceding page for backward chart pagination. `GET /v3/assets/mint/:mint/history?range=1d|7d` remains a compatibility route and projects each candle's USD close to `{ timestamp, priceUsd }`. The asset route accepts `includeHistory=false` to avoid loading compatibility history with its metadata.
 
 Birdeye token candles are provider-defined market aggregation and are not a selected Raydium pool. The browser never calls Birdeye directly or receives the API key.
 

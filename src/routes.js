@@ -1,6 +1,6 @@
-import { API_VERSION, CANDLE_KEY_PREFIX, FRESH_AFTER_MS, REFRESH_INTERVAL_MINUTES, REFRESH_INTERVAL_MS, STALE_AFTER_MS } from './constants.js';
+import { API_VERSION, CANDLE_KEY_PREFIX, CANDLE_PAGE_SIZE, FRESH_AFTER_MS, REFRESH_INTERVAL_MINUTES, REFRESH_INTERVAL_MS, STALE_AFTER_MS } from './constants.js';
 import { error, json } from './http.js';
-import { candlePlan, fetchCandles, mapV3Asset, tokenByMint } from './market.js';
+import { candlePlan, fetchCandles, legacyHistoryPlan, mapV3Asset, tokenByMint } from './market.js';
 import { isUsableSnapshot, loadWalletData, resolveSnapshot } from './snapshot.js';
 import { isBase58PublicKey } from './transforms.js';
 import { loadV3Events, loadV3Wallet, mapV3HistoryPoints, v3Asset } from './v3.js';
@@ -11,35 +11,38 @@ function usableCandles(history) {
   return history && typeof history === 'object' && Number.isFinite(Date.parse(history.fetchedAt)) && Array.isArray(history.candles);
 }
 
-export async function candlesForAsset(kv, mint, apiKey, range = '7d', endTimestamp = null) {
-  const plan = candlePlan(range);
-  if (!plan) throw new Error('Unsupported candle range.');
+export async function candlesForAsset(kv, mint, apiKey, timeframe = '1H', endTimestamp = null) {
+  const plan = candlePlan(timeframe);
+  if (!plan) throw new Error('Unsupported candle timeframe.');
   const endKey = endTimestamp === null ? 'latest' : String(endTimestamp);
-  const key = `${CANDLE_KEY_PREFIX}${mint}:${range}:${plan.interval}:usd:${endKey}`;
+  const key = `${CANDLE_KEY_PREFIX}${mint}:${plan.timeframe}:${CANDLE_PAGE_SIZE}:usd:${endKey}`;
   const cached = kv ? await kv.get(key, 'json') : null;
   const cachedUsable = usableCandles(cached) || (cached?.unavailable === true && Number.isFinite(Date.parse(cached.fetchedAt)));
   const age = cachedUsable ? Date.now() - Date.parse(cached.fetchedAt) : Infinity;
-  if (age >= 0 && age <= FRESH_AFTER_MS) return { candles: cached.unavailable ? null : cached.candles, interval: plan.interval, state: cached.unavailable ? 'unavailable' : 'fresh', fetchedAt: cached.fetchedAt, source: 'birdeye' };
+  if (age >= 0 && age <= FRESH_AFTER_MS) return { candles: cached.unavailable ? null : cached.candles, timeframe: plan.timeframe, state: cached.unavailable ? 'unavailable' : 'fresh', fetchedAt: cached.fetchedAt, source: 'birdeye' };
   try {
-    const result = await fetchCandles(mint, apiKey, range, endTimestamp === null ? Date.now() : endTimestamp * 1000);
+    const result = await fetchCandles(mint, apiKey, plan.timeframe, endTimestamp === null ? Date.now() : endTimestamp * 1000);
     if (!result) {
-      if (age >= 0 && age <= STALE_AFTER_MS && usableCandles(cached)) return { candles: cached.candles, interval: cached.interval || plan.interval, state: 'stale', fetchedAt: cached.fetchedAt, source: 'birdeye' };
+      if (age >= 0 && age <= STALE_AFTER_MS && usableCandles(cached)) return { candles: cached.candles, timeframe: cached.timeframe || plan.timeframe, state: 'stale', fetchedAt: cached.fetchedAt, source: 'birdeye' };
       const fetchedAt = new Date().toISOString();
-      if (kv?.put) await kv.put(key, JSON.stringify({ version: 1, mint, source: 'birdeye', interval: plan.interval, fetchedAt, unavailable: true }));
-      return { candles: null, interval: plan.interval, state: 'unavailable', fetchedAt, source: 'birdeye' };
+      if (kv?.put) await kv.put(key, JSON.stringify({ version: 2, mint, source: 'birdeye', timeframe: plan.timeframe, count: CANDLE_PAGE_SIZE, fetchedAt, unavailable: true }));
+      return { candles: null, timeframe: plan.timeframe, state: 'unavailable', fetchedAt, source: 'birdeye' };
     }
     const fetchedAt = new Date().toISOString();
-    if (kv?.put) await kv.put(key, JSON.stringify({ version: 1, mint, source: 'birdeye', interval: result.interval, fetchedAt, candles: result.candles }));
-    return { candles: result.candles, interval: result.interval, state: 'fresh', fetchedAt, source: 'birdeye' };
+    if (kv?.put) await kv.put(key, JSON.stringify({ version: 2, mint, source: 'birdeye', timeframe: result.timeframe, count: CANDLE_PAGE_SIZE, fetchedAt, candles: result.candles }));
+    return { candles: result.candles, timeframe: result.timeframe, state: 'fresh', fetchedAt, source: 'birdeye' };
   } catch (cause) {
     console.warn('Birdeye candles unavailable', { mint, message: cause.message });
-    return age >= 0 && age <= STALE_AFTER_MS && usableCandles(cached) ? { candles: cached.candles, interval: cached.interval || plan.interval, state: 'stale', fetchedAt: cached.fetchedAt, source: 'birdeye' } : { candles: null, interval: plan.interval, state: 'unavailable', fetchedAt: null, source: 'birdeye' };
+    return age >= 0 && age <= STALE_AFTER_MS && usableCandles(cached) ? { candles: cached.candles, timeframe: cached.timeframe || plan.timeframe, state: 'stale', fetchedAt: cached.fetchedAt, source: 'birdeye' } : { candles: null, timeframe: plan.timeframe, state: 'unavailable', fetchedAt: null, source: 'birdeye' };
   }
 }
 
-export async function historyForAsset(kv, mint, apiKey, range = '7d', endTimestamp = null) {
-  const history = await candlesForAsset(kv, mint, apiKey, range, endTimestamp);
-  return { ...history, points: history.candles?.map((candle) => ({ date: candle.timestamp, price: candle.closeUsd })) || null };
+export async function historyForAsset(kv, mint, apiKey, range = '7d') {
+  const plan = legacyHistoryPlan(range);
+  if (!plan) throw new Error('Unsupported price-history range.');
+  const history = await candlesForAsset(kv, mint, apiKey, plan.timeframe);
+  const cutoff = Date.now() - plan.durationMs;
+  return { ...history, points: history.candles?.filter((candle) => Date.parse(candle.timestamp) >= cutoff).map((candle) => ({ date: candle.timestamp, price: candle.closeUsd })) || null };
 }
 
 function v3Meta(meta, history = null) {
@@ -114,18 +117,22 @@ export async function route(request, env, config, id, origin) {
         return error('ASSET_LOOKUP_UNAVAILABLE', 'Asset data is currently unavailable.', 503, id, origin);
       }
     }
-    const range = url.searchParams.get('range') || '7d';
-    const allowedRanges = candleSuffix ? ['1h', '4h', '1d', '7d'] : ['1d', '7d'];
-    if (!allowedRanges.includes(range)) return error('INVALID_HISTORY_RANGE', `range must be ${candleSuffix ? '1h, 4h, 1d, or 7d' : '1d or 7d'}.`, 400, id, origin);
     const before = url.searchParams.get('before');
     if (!candleSuffix && before !== null) return error('INVALID_CANDLE_BEFORE', 'before is supported only by the candles route.', 400, id, origin);
     if (before !== null && (!/^\d+$/.test(before) || !Number.isSafeInteger(Number(before)) || Number(before) <= 0)) return error('INVALID_CANDLE_BEFORE', 'before must be a positive Unix timestamp in seconds.', 400, id, origin);
     const endTimestamp = before === null ? null : Number(before);
     const includeHistory = url.searchParams.get('includeHistory') !== 'false';
     if (!historySuffix && !candleSuffix && !includeHistory) return json({ data: v3Asset(asset), meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
-    const history = await historyForAsset(env.SNAPSHOTS, mint, config.birdeyeApiKey, range, endTimestamp);
+    if (candleSuffix) {
+      const timeframe = url.searchParams.get('timeframe') || '1H';
+      if (!candlePlan(timeframe)) return error('INVALID_CANDLE_TIMEFRAME', 'timeframe must be an exact supported Birdeye candle timeframe.', 400, id, origin);
+      const candles = await candlesForAsset(env.SNAPSHOTS, mint, config.birdeyeApiKey, timeframe, endTimestamp);
+      return json({ data: { mint, timeframe: candles.timeframe, count: CANDLE_PAGE_SIZE, candles: candles.candles }, meta: v3Meta(meta, candles) }, 200, id, origin, snapshotHeaders);
+    }
+    const range = url.searchParams.get('range') || '7d';
+    if (!legacyHistoryPlan(range)) return error('INVALID_HISTORY_RANGE', 'range must be 1d or 7d.', 400, id, origin);
+    const history = await historyForAsset(env.SNAPSHOTS, mint, config.birdeyeApiKey, range);
     const points = mapV3HistoryPoints(history.points);
-    if (candleSuffix) return json({ data: { mint, range, interval: history.interval, candles: history.candles }, meta: v3Meta(meta, history) }, 200, id, origin, snapshotHeaders);
     if (historySuffix) return json({ data: { mint, range, points }, meta: v3Meta(meta, history) }, 200, id, origin, snapshotHeaders);
     return json({ data: { ...v3Asset(asset), history: { points, state: state === 'fixture' ? 'fixture' : history.state, fetchedAt: history.fetchedAt } }, meta: v3Meta(meta, history) }, 200, id, origin, snapshotHeaders);
   }

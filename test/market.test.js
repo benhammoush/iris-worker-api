@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAX_CATALOG_ASSETS, SOL_MINT } from '../src/constants.js';
-import { fetchCandles, fetchPriceHistory, refreshDiscoveryCatalogs, refreshMarket } from '../src/market.js';
+import { CANDLE_TIMEFRAMES, fetchCandles, fetchPriceHistory, refreshDiscoveryCatalogs, refreshMarket } from '../src/market.js';
 
 test('market refresh uses Jupiter Tokens V2 fields for the verified ranked catalog', async () => {
   const originalFetch = globalThis.fetch;
@@ -64,21 +64,28 @@ test('discovery catalogs use Jupiter Trending and Recent endpoints', async () =>
 test('Birdeye requests USD Solana candles with the configured interval and preserves valid OHLCV data', async () => {
   const originalFetch = globalThis.fetch;
   let request;
+  const timestamp = Math.floor(Date.now() / 1000);
   globalThis.fetch = async (url, options) => {
     request = { url: String(url), options };
-    return { ok: true, json: async () => ({ success: true, data: { items: [{ unix_time: 1_760_000_000, o: 149, h: 152, l: 148, c: 150, v: 20, v_usd: 3000 }, { unix_time: 1_760_086_400, o: 150, h: 153, l: 149, c: 151, v: 21, v_usd: 3200 }] } }) };
+    return { ok: true, json: async () => ({ success: true, data: { items: [{ unix_time: timestamp - 60, o: 149, h: 152, l: 148, c: 150, v: 20, v_usd: 3000 }, { unix_time: timestamp, o: 150, h: 153, l: 149, c: 151, v: 21, v_usd: 3200 }] } }) };
   };
   try {
-    const candles = await fetchCandles(SOL_MINT, 'birdeye-key', '1d', 1_760_086_400_000);
-    const points = await fetchPriceHistory(SOL_MINT, 'birdeye-key', '1d');
+    const candles = await fetchCandles(SOL_MINT, 'birdeye-key', '1D', 1_760_086_400_000);
     assert.match(request.url, /public-api\.birdeye\.so\/defi\/v3\/ohlcv/);
-    assert.match(request.url, /type=15m/);
+    assert.match(request.url, /type=1D/);
+    assert.match(request.url, /mode=count/);
+    assert.match(request.url, /count_limit=300/);
     assert.match(request.url, /currency=usd/);
     assert.equal(request.options.headers['X-API-KEY'], 'birdeye-key');
     assert.equal(request.options.headers['x-chain'], 'solana');
-    assert.equal(candles.interval, '15m');
+    assert.equal(candles.timeframe, '1D');
     assert.equal(candles.candles[0].closeUsd, 150);
     assert.equal(candles.candles[0].volumeUsd, 3000);
+    const points = await fetchPriceHistory(SOL_MINT, 'birdeye-key', '1d');
     assert.deepEqual(points.map((point) => point.price), [150, 151]);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test('Birdeye exposes the complete exact-case supported timeframe allowlist', () => {
+  assert.deepEqual(CANDLE_TIMEFRAMES, ['1s', '15s', '30s', '1m', '3m', '5m', '15m', '30m', '1H', '2H', '4H', '6H', '8H', '12H', '1D', '3D', '1W', '1M']);
 });

@@ -1,4 +1,4 @@
-import { MAX_CATALOG_ASSETS, MIN_RECENT_CATALOG_VOLUME_USD, SOL_MINT } from './constants.js';
+import { CANDLE_PAGE_SIZE, MAX_CATALOG_ASSETS, MIN_RECENT_CATALOG_VOLUME_USD, SOL_MINT } from './constants.js';
 import { assetIdentity } from './transforms.js';
 
 const JUPITER = 'https://api.jup.ag';
@@ -130,15 +130,19 @@ export async function refreshDiscoveryCatalogs(apiKey) {
   return { trending, recent };
 }
 
-const candlePlans = {
-  '1h': { interval: '1m', durationMs: 60 * 60 * 1000 },
-  '4h': { interval: '5m', durationMs: 4 * 60 * 60 * 1000 },
-  '1d': { interval: '15m', durationMs: 24 * 60 * 60 * 1000 },
-  '7d': { interval: '1H', durationMs: 7 * 24 * 60 * 60 * 1000 }
+export const CANDLE_TIMEFRAMES = ['1s', '15s', '30s', '1m', '3m', '5m', '15m', '30m', '1H', '2H', '4H', '6H', '8H', '12H', '1D', '3D', '1W', '1M'];
+
+const legacyHistoryPlans = {
+  '1d': { timeframe: '15m', durationMs: 24 * 60 * 60 * 1000 },
+  '7d': { timeframe: '1H', durationMs: 7 * 24 * 60 * 60 * 1000 }
 };
 
-export function candlePlan(range) {
-  return candlePlans[range] || null;
+export function candlePlan(timeframe) {
+  return CANDLE_TIMEFRAMES.includes(timeframe) ? { timeframe } : null;
+}
+
+export function legacyHistoryPlan(range) {
+  return legacyHistoryPlans[range] || null;
 }
 
 function finite(value) {
@@ -158,12 +162,12 @@ function birdeyeCandle(item) {
   return { timestamp: new Date(unixTime * 1000).toISOString(), openUsd, highUsd, lowUsd, closeUsd, volume, volumeUsd };
 }
 
-export async function fetchCandles(mint, apiKey, range = '7d', endTime = Date.now()) {
+export async function fetchCandles(mint, apiKey, timeframe = '1H', endTime = Date.now(), count = CANDLE_PAGE_SIZE) {
   if (!apiKey) return null;
-  const plan = candlePlan(range);
-  if (!plan) throw new Error('Unsupported candle range.');
+  const plan = candlePlan(timeframe);
+  if (!plan) throw new Error('Unsupported candle timeframe.');
   const timeTo = Math.floor(endTime / 1000);
-  const query = new URLSearchParams({ address: mint, type: plan.interval, time_from: String(timeTo - Math.floor(plan.durationMs / 1000)), time_to: String(timeTo), mode: 'range', currency: 'usd', chart_type: 'price' });
+  const query = new URLSearchParams({ address: mint, type: plan.timeframe, mode: 'count', count_limit: String(count), time_to: String(timeTo), currency: 'usd', chart_type: 'price' });
   const response = await fetch(`${BIRDEYE}/defi/v3/ohlcv?${query}`, { headers: { 'X-API-KEY': apiKey, 'x-chain': 'solana', accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`Birdeye request failed with ${response.status}`);
   const payload = await response.json();
@@ -174,10 +178,13 @@ export async function fetchCandles(mint, apiKey, range = '7d', endTime = Date.no
     if (candle) byTimestamp.set(candle.timestamp, candle);
   }
   const candles = [...byTimestamp.values()].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
-  return candles.length ? { interval: plan.interval, candles } : null;
+  return candles.length ? { timeframe: plan.timeframe, candles } : null;
 }
 
 export async function fetchPriceHistory(mint, apiKey, range = '7d') {
-  const result = await fetchCandles(mint, apiKey, range);
-  return result?.candles.map((candle) => ({ date: candle.timestamp, price: candle.closeUsd })) || null;
+  const plan = legacyHistoryPlan(range);
+  if (!plan) throw new Error('Unsupported price-history range.');
+  const result = await fetchCandles(mint, apiKey, plan.timeframe);
+  const cutoff = Date.now() - plan.durationMs;
+  return result?.candles.filter((candle) => Date.parse(candle.timestamp) >= cutoff).map((candle) => ({ date: candle.timestamp, price: candle.closeUsd })) || null;
 }
