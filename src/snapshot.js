@@ -10,7 +10,7 @@ const HELIUS_ENHANCED = 'https://api.helius.xyz/v0';
 
 async function heliusRpc(method, params, apiKey) {
   const response = await fetch(`${HELIUS_RPC}?api-key=${encodeURIComponent(apiKey)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: method, method, params }), signal: AbortSignal.timeout(10_000) });
-  if (!response.ok) throw new Error(`Helius RPC request failed with ${response.status}`);
+  if (!response.ok) throw new Error(`Helius RPC request failed with ${response.status}: ${(await response.text()).slice(0, 500)}`);
   const payload = await response.json();
   if (payload.error) throw new Error(`Helius RPC error: ${payload.error.message || 'unknown'}`);
   return payload.result;
