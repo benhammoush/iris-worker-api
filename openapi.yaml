@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 3.6.0
+  version: 3.7.0
 paths:
   /internal/refresh:
     post:
@@ -116,7 +116,7 @@ paths:
       parameters:
         - { in: query, name: limit, schema: { type: integer, minimum: 10, maximum: 20, default: 15 } }
       responses:
-        '200': { description: Cached representative signature sample from one recent confirmed block. This is not a complete chain-wide transaction feed., content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+        '200': { description: Cached representative signature sample from one recent confirmed block. The Worker refreshes it every minute with Helius Parsed Events actions; this is not a complete chain-wide transaction feed., content: { application/json: { schema: { $ref: '#/components/schemas/RecentTransactionsEnvelope' } } } }
         '400': { description: INVALID_RECENT_TRANSACTION_LIMIT, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
 components:
   schemas:
@@ -204,6 +204,19 @@ components:
       properties:
         events: { type: array, items: { $ref: '#/components/schemas/TransactionEvent' } }
         nextCursor: { type: [string, 'null'], description: Opaque Helius paginationToken. }
+    RecentTransactionsEnvelope:
+      allOf:
+        - { $ref: '#/components/schemas/Envelope' }
+        - type: object
+          properties: { data: { type: object, properties: { transactions: { type: array, items: { $ref: '#/components/schemas/RecentTransaction' } } } } }
+    RecentTransaction:
+      required: [signature, slot, blockTime, status, action]
+      properties:
+        signature: { type: string }
+        slot: { type: integer }
+        blockTime: { type: [string, 'null'], format: date-time }
+        status: { type: string, enum: [confirmed] }
+        action: { type: [string, 'null'], description: Helius Parsed Events summary type or decoded instruction name; null means unknown. }
     TransactionEvent:
       type: object
       required: [id, timestamp, type, source, status, summary, description, transfers]

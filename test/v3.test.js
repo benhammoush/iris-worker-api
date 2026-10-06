@@ -5,7 +5,7 @@ import { SOL_MINT } from '../src/constants.js';
 import { mapV3Asset } from '../src/market.js';
 import { historyForAsset } from '../src/routes.js';
 import { loadV3Wallet, mapDasWallet, mapV3Event, mapV3HistoryPoints } from '../src/v3.js';
-import { loadRecentTransactionSample } from '../src/recentTransactions.js';
+import { loadRecentTransactionSample, refreshRecentTransactionSample } from '../src/recentTransactions.js';
 
 function env(overrides = {}) { return { CORS_ORIGINS: 'https://app.example', SNAPSHOTS: { get: async () => null, put: async () => {} }, ...overrides }; }
 
@@ -78,7 +78,7 @@ test('v3 history preserves a stale seven-day cache when CoinGecko reports unavai
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test('recent transaction samples cache signatures-only confirmed blocks and retain stale data on failure', async () => {
+test('recent transaction samples batch parsed actions, preserve signature order, and retain stale data on failure', async () => {
   const cache = new Map(); let calls = 0;
   const snapshots = { get: async (key) => cache.get(key) || null, put: async (key, value) => cache.set(key, JSON.parse(value)) };
   const originalFetch = globalThis.fetch;
@@ -87,16 +87,18 @@ test('recent transaction samples cache signatures-only confirmed blocks and reta
     const request = JSON.parse(options.body);
     if (request.method === 'getSlot') return { ok: true, json: async () => ({ result: 123 }) };
     if (request.method === 'getBlock') return { ok: true, json: async () => ({ result: { blockTime: 1_760_000_000, signatures: ['sig-a', 'sig-a', 'sig-b'] } }) };
+    if (Array.isArray(request.transactions)) return { ok: true, json: async () => ({ data: [{ signature: 'sig-b', parsed: { summary: null, instructions: [{ instructionName: 'create_account' }] } }, { signature: 'sig-a', parsed: { summary: { type: 'swap' } } }] }) };
     throw new Error(`Unexpected ${request.method}`);
   };
   try {
     const now = new Date('2026-10-06T00:00:00.000Z');
+    await refreshRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, now);
     const first = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, now);
     const second = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 10_000));
-    assert.equal(first.freshness, 'fresh'); assert.deepEqual(first.transactions, [{ signature: 'sig-a', slot: 123, blockTime: '2025-10-09T08:53:20.000Z', status: 'confirmed' }, { signature: 'sig-b', slot: 123, blockTime: '2025-10-09T08:53:20.000Z', status: 'confirmed' }]);
-    assert.equal(second.freshness, 'fresh'); assert.equal(calls, 2);
+    assert.equal(first.freshness, 'fresh'); assert.deepEqual(first.transactions, [{ signature: 'sig-a', slot: 123, blockTime: '2025-10-09T08:53:20.000Z', status: 'confirmed', action: 'swap' }, { signature: 'sig-b', slot: 123, blockTime: '2025-10-09T08:53:20.000Z', status: 'confirmed', action: 'create_account' }]);
+    assert.equal(second.freshness, 'fresh'); assert.equal(calls, 3);
     globalThis.fetch = async () => { throw new Error('provider unavailable'); };
-    const stale = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 31_000));
+    const stale = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 121_000));
     assert.equal(stale.freshness, 'stale'); assert.equal(stale.transactions.length, 2);
   } finally { globalThis.fetch = originalFetch; }
 });
