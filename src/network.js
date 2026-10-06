@@ -20,6 +20,12 @@ function fulfilled(result) {
   return result.status === 'fulfilled' ? result.value : null;
 }
 
+function logRejectedRpcCalls(methods, results) {
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') console.warn('Helius network RPC unavailable', { method: methods[index], message: result.reason?.message || String(result.reason) });
+  });
+}
+
 export function summarizePerformance(samples) {
   const usable = (Array.isArray(samples) ? samples : []).filter((sample) => finite(sample?.numTransactions) !== null && finite(sample?.samplePeriodSecs) !== null && sample.samplePeriodSecs > 0);
   const seconds = usable.reduce((total, sample) => total + sample.samplePeriodSecs, 0);
@@ -69,9 +75,11 @@ export function normalizeNetworkSnapshot(results, previous = null, now = new Dat
 }
 
 export async function refreshNetworkMetrics(rpc, previous = null, now = new Date()) {
+  const initialMethods = ['getSlot:processed', 'getSlot:confirmed', 'getSlot:finalized', 'getBlockHeight', 'getEpochInfo', 'getRecentPerformanceSamples', 'getRecentPrioritizationFees', 'getVoteAccounts', 'getSupply', 'getInflationRate', 'getInflationGovernor'];
   const initial = await Promise.allSettled([
     rpc('getSlot', [{ commitment: 'processed' }]), rpc('getSlot', [{ commitment: 'confirmed' }]), rpc('getSlot', [{ commitment: 'finalized' }]), rpc('getBlockHeight', [{ commitment: 'finalized' }]), rpc('getEpochInfo', [{ commitment: 'finalized' }]), rpc('getRecentPerformanceSamples', [5]), rpc('getRecentPrioritizationFees', []), rpc('getVoteAccounts', [{ commitment: 'finalized' }]), rpc('getSupply', [{ commitment: 'finalized', excludeNonCirculatingAccountsList: true }]), rpc('getInflationRate', [{ commitment: 'finalized' }]), rpc('getInflationGovernor', [{ commitment: 'finalized' }])
   ]);
+  logRejectedRpcCalls(initialMethods, initial);
   const [processed, confirmed, finalized, blockHeight, epoch, performance, priorityFees, voteAccounts, supply, inflationRate, inflationGovernor] = initial;
   const finalizedSlot = fulfilled(finalized);
   const epochInfo = fulfilled(epoch);
@@ -83,6 +91,7 @@ export async function refreshNetworkMetrics(rpc, previous = null, now = new Date
     finalizedSlot === null || !epochInfo ? Promise.reject(new Error('Epoch range unavailable')) : rpc('getBlockProduction', [{ commitment: 'finalized', range: { firstSlot: epochInfo.absoluteSlot - epochInfo.slotIndex, lastSlot: finalizedSlot } }]),
     latestBlockSlot === null ? Promise.reject(new Error('No recent finalized block is available')) : rpc('getBlock', [latestBlockSlot, { commitment: 'finalized', transactionDetails: 'full', rewards: false, maxSupportedTransactionVersion: 0 }])
   ]);
+  logRejectedRpcCalls(['getBlockTime', 'getBlockProduction', 'getBlock'], dependent);
   const [blockTime, production, block] = dependent;
   return normalizeNetworkSnapshot({ slots: { status: processed.status === 'fulfilled' && confirmed.status === 'fulfilled' && finalized.status === 'fulfilled' ? 'fulfilled' : 'rejected', value: { processed: fulfilled(processed), confirmed: fulfilled(confirmed), finalized: finalizedSlot } }, blockHeight, epoch, performance, priorityFees, voteAccounts, supply, inflationRate, inflationGovernor, blockTime, production, block }, previous, now);
 }
