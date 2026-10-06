@@ -158,11 +158,11 @@ function birdeyeCandle(item) {
   return { timestamp: new Date(unixTime * 1000).toISOString(), openUsd, highUsd, lowUsd, closeUsd, volume, volumeUsd };
 }
 
-export async function fetchCandles(mint, apiKey, range = '7d', now = Date.now()) {
+export async function fetchCandles(mint, apiKey, range = '7d', endTime = Date.now()) {
   if (!apiKey) return null;
   const plan = candlePlan(range);
   if (!plan) throw new Error('Unsupported candle range.');
-  const timeTo = Math.floor(now / 1000);
+  const timeTo = Math.floor(endTime / 1000);
   const query = new URLSearchParams({ address: mint, type: plan.interval, time_from: String(timeTo - Math.floor(plan.durationMs / 1000)), time_to: String(timeTo), mode: 'range', currency: 'usd', chart_type: 'price' });
   const response = await fetch(`${BIRDEYE}/defi/v3/ohlcv?${query}`, { headers: { 'X-API-KEY': apiKey, 'x-chain': 'solana', accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`Birdeye request failed with ${response.status}`);

@@ -36,6 +36,24 @@ test('v3 canonical mint routes return range-aware Birdeye close-price history an
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('v3 candle pagination requests the preceding provider window and rejects invalid cursors', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = '';
+  globalThis.fetch = async (url) => {
+    requestUrl = String(url);
+    return { ok: true, json: async () => ({ success: true, data: { items: [{ unix_time: 1_760_000_000, o: 149, h: 151, l: 148, c: 150, v: 1, v_usd: 150 }] } }) };
+  };
+  try {
+    const response = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/candles?range=1h&before=1760000000`), env({ BIRDEYE_API_KEY: 'key' }), {});
+    assert.equal(response.status, 200);
+    assert.match(requestUrl, /type=1m/);
+    assert.match(requestUrl, /time_to=1760000000/);
+    const invalid = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/candles?before=invalid`), env({ BIRDEYE_API_KEY: 'key' }), {});
+    assert.equal(invalid.status, 400);
+    assert.equal((await invalid.json()).error.code, 'INVALID_CANDLE_BEFORE');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('v3 resolves a valid mint outside the snapshot through Jupiter', async () => {
   const mint = 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN';
   const originalFetch = globalThis.fetch;

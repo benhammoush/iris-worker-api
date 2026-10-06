@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 3.11.1
+  version: 3.11.2
 paths:
   /internal/refresh:
     post:
@@ -99,6 +99,7 @@ paths:
       parameters:
         - { in: path, name: mint, required: true, schema: { type: string } }
         - { in: query, name: range, schema: { type: string, enum: [1h, 4h, 1d, 7d], default: 1d } }
+        - { in: query, name: before, description: Exclusive-end Unix timestamp in seconds for the preceding candle window., schema: { type: integer, minimum: 1 } }
       responses:
         '200': { description: Birdeye USD OHLCV candles for the requested token-market lookback, content: { application/json: { schema: { $ref: '#/components/schemas/CandlesEnvelope' } } } }
   /v3/wallets/{address}:
