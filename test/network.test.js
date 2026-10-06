@@ -40,3 +40,12 @@ test('network refresh uses the latest actual finalized block for average fees', 
   assert.equal(snapshot.fees.averageFeeLamports, 6000);
   assert.equal(snapshot.fees.medianPriorityFeeMicroLamports, 25);
 });
+
+test('supply remains available when inflation data is unavailable', () => {
+  const fulfilled = (value) => ({ status: 'fulfilled', value });
+  const rejected = { status: 'rejected', reason: new Error('unavailable') };
+  const snapshot = normalizeNetworkSnapshot({ slots: rejected, epoch: rejected, blockHeight: rejected, blockTime: rejected, performance: rejected, production: rejected, priorityFees: rejected, voteAccounts: rejected, supply: fulfilled({ value: { total: 1_000_000_000, circulating: 800_000_000, nonCirculating: 200_000_000 } }), inflationRate: rejected, inflationGovernor: rejected, block: rejected });
+  assert.equal(snapshot.economics.state, 'fresh');
+  assert.equal(snapshot.economics.totalSol, 1);
+  assert.equal(snapshot.economics.circulatingSol, 0.8);
+});
