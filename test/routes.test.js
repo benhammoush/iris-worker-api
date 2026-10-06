@@ -17,11 +17,11 @@ test('protected refresh rejects requests without its token', async () => {
 });
 
 test('protected refresh publishes the snapshot when the optional dashboard cache is unavailable', async () => {
-  const originalWarn = console.warn; console.warn = () => {};
+  const originalWarn = console.warn; const originalFetch = globalThis.fetch; console.warn = () => {}; globalThis.fetch = async () => { throw new Error('provider unavailable'); };
   try {
     const response = await worker.fetch(new Request('https://api.example/internal/refresh', { method: 'POST', headers: { authorization: 'Bearer expected' } }), env({ REFRESH_TOKEN: 'expected' }), {});
     assert.equal(response.status, 200); assert.equal((await response.json()).data.status, 'refreshed');
-  } finally { console.warn = originalWarn; }
+  } finally { console.warn = originalWarn; globalThis.fetch = originalFetch; }
 });
 
 test('v2 is canonical and v1 remains an asset route alias', async () => {
@@ -51,6 +51,15 @@ test('v3 catalogs returns the snapshot-backed Jupiter list shape', async () => {
   assert.equal(body.data.topTraded.length, 3);
   assert.deepEqual(body.data.trending, []);
   assert.deepEqual(body.data.recent, []);
+});
+
+test('v3 DefiLlama returns its independently cached dashboard data', async () => {
+  const dashboard = { source: 'defillama', fetchedAt: new Date().toISOString(), dexes: { total24hUsd: 10, total7dUsd: 20, items: [{ name: 'Raydium', slug: 'raydium', total24hUsd: 10, total7dUsd: 20, change1dPct: 1 }] }, protocols: { total: 1, items: [{ name: 'Jupiter', slug: 'jupiter', category: 'DEX', solanaTvlUsd: 30, change1dPct: 2, change7dPct: 3 }] } };
+  const response = await worker.fetch(new Request('https://api.example/v3/defillama'), env({ SNAPSHOTS: { get: async (key) => key === 'defillama:v3:dashboard' ? dashboard : null } }), {});
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.data.dexes.items[0].slug, 'raydium');
+  assert.equal(body.meta.defillama.freshness, 'fresh');
 });
 
 test('v3 network returns an explicit unavailable fixture without fabricating metrics', async () => {

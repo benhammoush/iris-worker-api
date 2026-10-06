@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 3.9.1
+  version: 3.10.0
 paths:
   /internal/refresh:
     post:
@@ -111,6 +111,10 @@ paths:
     get:
       responses:
         '200': { description: Canonical reviewed-pool registry-scoped swaps only, content: { application/json: { schema: { $ref: '#/components/schemas/Envelope' } } } }
+  /v3/defillama:
+    get:
+      responses:
+        '200': { description: Cached DefiLlama Solana DEX volumes and tracked DeFi protocols ranked by Solana TVL. This is aggregate protocol analytics, not a complete Solana program inventory., content: { application/json: { schema: { $ref: '#/components/schemas/DefiLlamaEnvelope' } } } }
   /v3/transactions/recent:
     get:
       parameters:
@@ -128,6 +132,19 @@ components:
       type: object
       required: [error]
       properties: { error: { type: object, required: [code, message, requestId], properties: { code: { type: string }, message: { type: string }, requestId: { type: string } } } }
+    DefiLlamaEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [source, fetchedAt, dexes, protocols]
+          properties:
+            source: { type: string, const: defillama }
+            fetchedAt: { type: [string, 'null'], format: date-time }
+            dexes: { type: object, required: [total24hUsd, total7dUsd, items] }
+            protocols: { type: object, required: [total, items] }
+        meta: { type: object }
     Asset:
       type: object
       required: [mint, symbol, name, decimals, iconUrl, priceUsd, marketCapUsd, circulatingSupply, totalSupply, fullyDilutedValuationUsd, change24hPct, liquidityUsd, holderCount, verification, quality, activity]

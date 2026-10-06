@@ -5,6 +5,7 @@ import { isUsableSnapshot, loadWalletData, resolveSnapshot } from './snapshot.js
 import { isBase58PublicKey } from './transforms.js';
 import { loadV3Events, loadV3Wallet, mapV3HistoryPoints, v3Asset } from './v3.js';
 import { loadHeliusDashboardSample } from './recentTransactions.js';
+import { loadDefiLlamaDashboard } from './defillama.js';
 
 function usableHistory(history) {
   return history && typeof history === 'object' && Number.isFinite(Date.parse(history.fetchedAt)) && Array.isArray(history.points);
@@ -71,6 +72,11 @@ export async function route(request, env, config, id, origin) {
   if (url.pathname === '/v3/catalogs') {
     const catalogs = snapshot.catalogs || { topTraded: snapshot.assets, trending: [], recent: [] };
     return json({ data: { topTraded: (catalogs.topTraded || []).map(v3Asset), trending: (catalogs.trending || []).map(v3Asset), recent: (catalogs.recent || []).map(v3Asset) }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
+  }
+  if (url.pathname === '/v3/defillama') {
+    const { dashboard, state: freshness } = await loadDefiLlamaDashboard(env.SNAPSHOTS);
+    const data = dashboard || { source: 'defillama', fetchedAt: null, dexes: { total24hUsd: null, total7dUsd: null, items: [] }, protocols: { total: 0, items: [] } };
+    return json({ data, meta: { ...v3Meta(meta), defillama: { source: 'defillama', freshness, fetchedAt: data.fetchedAt } } }, 200, id, origin, snapshotHeaders);
   }
   if (url.pathname === '/v3/swaps') return json({ data: { scope: snapshot.market.swaps?.scope ?? 'registered-liquid-pools', swaps: snapshot.swaps.map(v3Swap) }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v3/transactions/recent') {
