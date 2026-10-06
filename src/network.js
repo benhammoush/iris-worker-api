@@ -16,6 +16,16 @@ function staleOrUnavailable(previous, key) {
   return prior && prior.state !== 'unavailable' ? { ...prior, state: 'stale' } : { state: 'unavailable', asOf: null };
 }
 
+export function staleDashboardNetwork(previous = null) {
+  return {
+    source: 'helius-rpc',
+    fetchedAt: previous?.fetchedAt ?? null,
+    chain: staleOrUnavailable(previous, 'chain'),
+    performance: staleOrUnavailable(previous, 'performance'),
+    fees: staleOrUnavailable(previous, 'fees')
+  };
+}
+
 function fulfilled(result) {
   return result.status === 'fulfilled' ? result.value : null;
 }
@@ -97,4 +107,31 @@ export async function refreshNetworkMetrics(rpc, previous = null, now = new Date
   logRejectedRpcCalls(['getBlockTime', 'getBlockProduction', 'getBlock'], dependent);
   const [blockTime, production, block] = dependent;
   return normalizeNetworkSnapshot({ slots: { status: processed.status === 'fulfilled' && confirmed.status === 'fulfilled' && finalized.status === 'fulfilled' ? 'fulfilled' : 'rejected', value: { processed: fulfilled(processed), confirmed: fulfilled(confirmed), finalized: finalizedSlot } }, blockHeight, epoch, performance, priorityFees, voteAccounts, supply, inflationRate, inflationGovernor, blockTime, production, block }, previous, now);
+}
+
+export async function refreshDashboardNetworkMetrics(rpc, confirmedSlot, previous = null, now = new Date()) {
+  const asOf = now.toISOString();
+  const initial = await Promise.allSettled([
+    rpc('getSlot', [{ commitment: 'processed' }]),
+    rpc('getSlot', [{ commitment: 'finalized' }]),
+    rpc('getBlockHeight', [{ commitment: 'finalized' }]),
+    rpc('getEpochInfo', [{ commitment: 'finalized' }]),
+    rpc('getRecentPerformanceSamples', [5])
+  ]);
+  logRejectedRpcCalls(['getSlot:processed', 'getSlot:finalized', 'getBlockHeight', 'getEpochInfo', 'getRecentPerformanceSamples'], initial);
+  const [processed, finalized, blockHeight, epoch, performanceSamples] = initial;
+  const finalizedSlot = fulfilled(finalized);
+  const blockSlotsResult = finalizedSlot === null ? { status: 'rejected', reason: new Error('Finalized slot unavailable') } : await Promise.allSettled([rpc('getBlocksWithLimit', [Math.max(0, finalizedSlot - 500), 500, { commitment: 'finalized' }])]).then(([result]) => result);
+  const blockSlots = fulfilled(blockSlotsResult);
+  const latestBlockSlot = Array.isArray(blockSlots) && blockSlots.length ? blockSlots[blockSlots.length - 1] : null;
+  if (blockSlotsResult.status === 'rejected') console.warn('Helius network RPC unavailable', { method: 'getBlocksWithLimit', message: blockSlotsResult.reason?.message || String(blockSlotsResult.reason) });
+  else if (latestBlockSlot === null) console.warn('Helius network RPC returned no block slots', { method: 'getBlocksWithLimit', finalizedSlot });
+  const blockResult = finalizedSlot === null ? { status: 'rejected', reason: new Error('Finalized slot unavailable') } : await Promise.allSettled([rpc('getBlock', [latestBlockSlot ?? finalizedSlot, { commitment: 'finalized', transactionDetails: 'full', rewards: false, maxSupportedTransactionVersion: 1 }])]).then(([result]) => result);
+  if (blockResult.status === 'rejected') console.warn('Helius network RPC unavailable', { method: 'getBlock', message: blockResult.reason?.message || String(blockResult.reason) });
+  const chain = fulfilled(processed) !== null && Number.isInteger(confirmedSlot) && confirmedSlot >= 0 && finalizedSlot !== null && fulfilled(blockHeight) !== null && fulfilled(epoch) ? { state: 'fresh', asOf, commitment: 'finalized', processedSlot: finite(fulfilled(processed)), confirmedSlot: finite(confirmedSlot), finalizedSlot: finite(finalizedSlot), blockHeight: finite(fulfilled(blockHeight)), epoch: finite(fulfilled(epoch).epoch) } : staleOrUnavailable(previous, 'chain');
+  const performance = fulfilled(performanceSamples) ? { state: 'fresh', asOf, ...summarizePerformance(fulfilled(performanceSamples)) } : staleOrUnavailable(previous, 'performance');
+  const block = fulfilled(blockResult);
+  const blockSummary = block ? summarizeLatestBlock(block) : null;
+  const fees = blockSummary ? { state: 'fresh', asOf, averageFeeLamports: blockSummary.averageFeeLamports, feeSampleCount: blockSummary.feeSampleCount } : staleOrUnavailable(previous, 'fees');
+  return { source: 'helius-rpc', fetchedAt: asOf, chain, performance, fees };
 }

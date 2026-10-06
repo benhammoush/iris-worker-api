@@ -2,7 +2,7 @@ import { getConfig } from './config.js';
 import { error, json, requestId } from './http.js';
 import { route } from './routes.js';
 import { refreshSnapshot } from './snapshot.js';
-import { refreshRecentTransactionSample } from './recentTransactions.js';
+import { refreshHeliusDashboardSample } from './recentTransactions.js';
 
 function allowedOrigin(request, config) {
   const origin = request.headers.get('origin');
@@ -23,7 +23,7 @@ export default {
       const expectedToken = env.REFRESH_TOKEN;
       if (!expectedToken || request.headers.get('authorization') !== `Bearer ${expectedToken}`) return error('REFRESH_UNAUTHORIZED', 'Refresh authorization is invalid.', 401, id, origin);
       try {
-        const [snapshot] = await Promise.all([refreshSnapshot(env, config), refreshRecentTransactionSample(env, config)]);
+        const [snapshot] = await Promise.all([refreshSnapshot(env, config), refreshHeliusDashboardSample(env, config)]);
         return json({ data: { status: 'refreshed', createdAt: snapshot.createdAt }, meta: { requestId: id } }, 200, id, origin, { 'cache-control': 'no-store' });
       } catch (cause) {
         console.error('deployment refresh failed', { requestId: id, message: cause.message });
@@ -38,9 +38,9 @@ export default {
       const config = getConfig(env);
       const minute = Math.floor(event.scheduledTime / 60_000);
       if (minute % 15 === 0) {
-        await Promise.all([refreshSnapshot(env, config), refreshRecentTransactionSample(env, config)]);
+        await Promise.all([refreshSnapshot(env, config), refreshHeliusDashboardSample(env, config)]);
       } else {
-        await refreshRecentTransactionSample(env, config);
+        await refreshHeliusDashboardSample(env, config);
       }
     } catch (cause) {
       console.error('scheduled refresh failed', { message: cause.message });

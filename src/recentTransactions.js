@@ -1,10 +1,16 @@
-import { STALE_AFTER_MS, V3_RECENT_TRANSACTIONS_FRESH_AFTER_MS, V3_RECENT_TRANSACTIONS_KEY, V3_RECENT_TRANSACTIONS_MAX } from './constants.js';
+import { STALE_AFTER_MS, V3_HELIUS_DASHBOARD_KEY, V3_RECENT_TRANSACTIONS_FRESH_AFTER_MS, V3_RECENT_TRANSACTIONS_KEY, V3_RECENT_TRANSACTIONS_MAX } from './constants.js';
 import { heliusRpc } from './v3.js';
+import { refreshDashboardNetworkMetrics, staleDashboardNetwork } from './network.js';
 
 let pendingRefresh = null;
+let pendingDashboardRefresh = null;
 
 function usableSample(sample) {
   return sample && typeof sample === 'object' && Number.isFinite(Date.parse(sample.asOf)) && Number.isInteger(sample.slot) && Array.isArray(sample.transactions);
+}
+
+function usableDashboardSample(sample) {
+  return usableSample(sample) && sample.network && typeof sample.network === 'object' && sample.network.chain && typeof sample.network.chain === 'object' && sample.network.performance && typeof sample.network.performance === 'object' && sample.network.fees && typeof sample.network.fees === 'object';
 }
 
 function signaturesFromBlock(block) {
@@ -26,10 +32,10 @@ async function parsedEvents(signatures, apiKey) {
   return Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : [];
 }
 
-export async function refreshRecentTransactionSample(env, config, now = new Date()) {
+export async function refreshRecentTransactionSample(env, config, now = new Date(), confirmedSlot = null, persist = true) {
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
   if (!apiKey) throw new Error('Helius is not configured.');
-  const slot = await heliusRpc('getSlot', [{ commitment: 'confirmed' }], apiKey);
+  const slot = confirmedSlot ?? await heliusRpc('getSlot', [{ commitment: 'confirmed' }], apiKey);
   if (!Number.isInteger(slot) || slot < 0) throw new Error('Helius returned an invalid confirmed slot.');
   const block = await heliusRpc('getBlock', [slot, { commitment: 'confirmed', transactionDetails: 'signatures', rewards: false, maxSupportedTransactionVersion: 1 }], apiKey);
   const blockTime = Number.isFinite(block?.blockTime) ? new Date(block.blockTime * 1000).toISOString() : null;
@@ -44,8 +50,45 @@ export async function refreshRecentTransactionSample(env, config, now = new Date
   const parsedBySignature = new Map((parsed || []).filter((event) => typeof event?.signature === 'string').map((event) => [event.signature, event]));
   const transactions = signatures.map((signature) => ({ signature, slot, blockTime, status: 'confirmed', action: actionFromParsedEvent(parsedBySignature.get(signature)) }));
   const sample = { version: 2, source: parsed ? 'helius-rpc-parsed-events' : 'helius-rpc', asOf: now.toISOString(), slot, transactions };
-  if (env.SNAPSHOTS?.put) await env.SNAPSHOTS.put(V3_RECENT_TRANSACTIONS_KEY, JSON.stringify(sample), { expirationTtl: Math.ceil(STALE_AFTER_MS / 1000) });
+  if (persist && env.SNAPSHOTS?.put) await env.SNAPSHOTS.put(V3_RECENT_TRANSACTIONS_KEY, JSON.stringify(sample), { expirationTtl: Math.ceil(STALE_AFTER_MS / 1000) });
   return sample;
+}
+
+export async function refreshHeliusDashboardSample(env, config, previous = null, now = new Date()) {
+  const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
+  if (!apiKey) throw new Error('Helius is not configured.');
+  const confirmedSlot = await heliusRpc('getSlot', [{ commitment: 'confirmed' }], apiKey);
+  if (!Number.isInteger(confirmedSlot) || confirmedSlot < 0) throw new Error('Helius returned an invalid confirmed slot.');
+  const [transactionsResult, networkResult] = await Promise.allSettled([
+    refreshRecentTransactionSample(env, config, now, confirmedSlot, false),
+    refreshDashboardNetworkMetrics((method, params, timeoutMs) => heliusRpc(method, params, apiKey, timeoutMs), confirmedSlot, previous?.network, now)
+  ]);
+  if (transactionsResult.status === 'rejected') console.warn('Recent transaction refresh unavailable', { message: transactionsResult.reason?.message || String(transactionsResult.reason) });
+  if (networkResult.status === 'rejected') console.warn('Helius dashboard network refresh unavailable', { message: networkResult.reason?.message || String(networkResult.reason) });
+  if (transactionsResult.status === 'rejected' && networkResult.status === 'rejected') throw new Error('Helius dashboard refresh failed.');
+  const transactions = transactionsResult.status === 'fulfilled' ? transactionsResult.value.transactions : previous?.transactions || [];
+  const network = networkResult.status === 'fulfilled' ? networkResult.value : staleDashboardNetwork(previous?.network);
+  const transactionsFreshness = transactionsResult.status === 'fulfilled' ? 'fresh' : transactions.length ? 'stale' : 'unavailable';
+  const transactionAsOf = transactionsResult.status === 'fulfilled' ? now.toISOString() : previous?.transactionAsOf ?? null;
+  const sample = { version: 1, source: 'helius-rpc', asOf: now.toISOString(), slot: confirmedSlot, transactionAsOf, transactionsFreshness, transactions, network };
+  if (env.SNAPSHOTS?.put) await env.SNAPSHOTS.put(V3_HELIUS_DASHBOARD_KEY, JSON.stringify(sample), { expirationTtl: Math.ceil(STALE_AFTER_MS / 1000) });
+  return sample;
+}
+
+export async function loadHeliusDashboardSample(env, config, now = new Date(), refreshIfStale = false) {
+  const cached = env.SNAPSHOTS?.get ? await env.SNAPSHOTS.get(V3_HELIUS_DASHBOARD_KEY, 'json') : null;
+  const age = usableDashboardSample(cached) ? now.getTime() - Date.parse(cached.asOf) : Infinity;
+  if (age >= 0 && age <= V3_RECENT_TRANSACTIONS_FRESH_AFTER_MS) return { ...cached, freshness: 'fresh' };
+  if (refreshIfStale) {
+    try {
+      pendingDashboardRefresh ||= refreshHeliusDashboardSample(env, config, cached, now).finally(() => { pendingDashboardRefresh = null; });
+      return { ...await pendingDashboardRefresh, freshness: 'fresh' };
+    } catch (cause) {
+      console.warn('Helius dashboard refresh unavailable', { message: cause.message });
+    }
+  }
+  if (age >= 0 && age <= STALE_AFTER_MS) return { ...cached, freshness: 'stale' };
+  return { source: 'helius-rpc', asOf: null, slot: null, transactionAsOf: null, transactionsFreshness: 'unavailable', transactions: [], network: staleDashboardNetwork(), freshness: 'unavailable' };
 }
 
 export async function loadRecentTransactionSample(env, config, now = new Date(), refreshIfStale = false) {

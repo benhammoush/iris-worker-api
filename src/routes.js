@@ -4,7 +4,7 @@ import { fetchPriceHistory, mapV3Asset, tokenByMint } from './market.js';
 import { isUsableSnapshot, loadWalletData, resolveSnapshot } from './snapshot.js';
 import { isBase58PublicKey } from './transforms.js';
 import { loadV3Events, loadV3Wallet, mapV3HistoryPoints, v3Asset } from './v3.js';
-import { loadRecentTransactionSample } from './recentTransactions.js';
+import { loadHeliusDashboardSample } from './recentTransactions.js';
 
 function usableHistory(history) {
   return history && typeof history === 'object' && Number.isFinite(Date.parse(history.fetchedAt)) && Array.isArray(history.points);
@@ -77,8 +77,8 @@ export async function route(request, env, config, id, origin) {
     const rawLimit = url.searchParams.get('limit');
     const limit = rawLimit === null ? 15 : Number(rawLimit);
     if (!Number.isInteger(limit) || limit < 10 || limit > 20) return error('INVALID_RECENT_TRANSACTION_LIMIT', 'limit must be an integer from 10 to 20.', 400, id, origin);
-    const sample = await loadRecentTransactionSample(env, config, new Date(), true);
-    return json({ data: { transactions: sample.transactions.slice(0, limit) }, meta: { ...v3Meta(meta), recentTransactions: { source: sample.source, freshness: sample.freshness, asOf: sample.asOf, slot: sample.slot, sampled: true, limit } } }, 200, id, origin, snapshotHeaders);
+    const sample = await loadHeliusDashboardSample(env, config, new Date(), true);
+    return json({ data: { network: sample.network, transactions: sample.transactions.slice(0, limit) }, meta: { ...v3Meta(meta), recentTransactions: { source: sample.source, freshness: sample.transactionsFreshness ?? sample.freshness, asOf: sample.transactionAsOf ?? sample.asOf, slot: sample.slot, sampled: true, limit }, network: { source: sample.network.source, freshness: { chain: sample.network.chain.state, performance: sample.network.performance.state, fees: sample.network.fees.state }, asOf: sample.network.fetchedAt } } }, 200, id, origin, snapshotHeaders);
   }
   if (url.pathname.startsWith('/v3/assets/mint/')) {
     const suffix = url.pathname.slice('/v3/assets/mint/'.length);

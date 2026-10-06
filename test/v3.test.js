@@ -5,7 +5,7 @@ import { SOL_MINT } from '../src/constants.js';
 import { mapV3Asset } from '../src/market.js';
 import { historyForAsset } from '../src/routes.js';
 import { loadV3Wallet, mapDasWallet, mapV3Event, mapV3HistoryPoints } from '../src/v3.js';
-import { loadRecentTransactionSample, refreshRecentTransactionSample } from '../src/recentTransactions.js';
+import { loadHeliusDashboardSample, loadRecentTransactionSample, refreshHeliusDashboardSample, refreshRecentTransactionSample } from '../src/recentTransactions.js';
 
 function env(overrides = {}) { return { CORS_ORIGINS: 'https://app.example', SNAPSHOTS: { get: async () => null, put: async () => {} }, ...overrides }; }
 
@@ -120,6 +120,31 @@ test('recent transaction samples remain fresh when Parsed Events is unavailable'
     const sample = await refreshRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date('2026-10-06T00:00:00.000Z'));
     assert.equal(sample.source, 'helius-rpc'); assert.equal(sample.transactions[0].action, null);
   } finally { globalThis.fetch = originalFetch; console.warn = originalWarn; }
+});
+
+test('Helius dashboard samples combine the 15-second transaction and requested network metrics', async () => {
+  const cache = new Map(); const snapshots = { get: async (key) => cache.get(key) || null, put: async (key, value) => cache.set(key, JSON.parse(value)) };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    if (request.method === 'getSlot') return { ok: true, json: async () => ({ result: request.params?.[0]?.commitment === 'processed' ? 120 : request.params?.[0]?.commitment === 'finalized' ? 118 : 119 }) };
+    if (request.method === 'getBlockHeight') return { ok: true, json: async () => ({ result: 100 }) };
+    if (request.method === 'getEpochInfo') return { ok: true, json: async () => ({ result: { epoch: 7 } }) };
+    if (request.method === 'getRecentPerformanceSamples') return { ok: true, json: async () => ({ result: [{ numTransactions: 200, numNonVoteTransactions: 150, samplePeriodSecs: 2 }, { numTransactions: 100, numNonVoteTransactions: 75, samplePeriodSecs: 1 }] }) };
+    if (request.method === 'getBlocksWithLimit') return { ok: true, json: async () => ({ result: [117] }) };
+    if (request.method === 'getBlock') return { ok: true, json: async () => ({ result: request.params?.[1]?.transactionDetails === 'signatures' ? { blockTime: 1_760_000_000, signatures: ['sig-a'] } : { transactions: [{ meta: { fee: 100 } }, { meta: { fee: 300 } }] } }) };
+    if (Array.isArray(request.transactions)) return { ok: true, json: async () => ({ data: [] }) };
+    throw new Error(`Unexpected ${request.method}`);
+  };
+  try {
+    const now = new Date('2026-10-06T00:00:00.000Z');
+    const sample = await refreshHeliusDashboardSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, null, now);
+    assert.equal(sample.network.chain.processedSlot, 120); assert.equal(sample.network.chain.confirmedSlot, 119); assert.equal(sample.network.chain.blockHeight, 100); assert.equal(sample.network.chain.epoch, 7);
+    assert.equal(sample.network.performance.tps, 100); assert.equal(sample.network.performance.nonVoteTps, 75); assert.equal(sample.network.fees.averageFeeLamports, 200);
+    assert.equal(sample.transactionsFreshness, 'fresh'); assert.equal(cache.has('transactions:v3:recent'), false);
+    const cached = await loadHeliusDashboardSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 10_000), true);
+    assert.equal(cached.freshness, 'fresh'); assert.equal(cached.transactions.length, 1);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test('DAS wallet mapping preserves atomic balances, caps holdings, and reports partial valuation', () => {

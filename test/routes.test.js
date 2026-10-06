@@ -58,11 +58,11 @@ test('v3 recent transactions returns a bounded cached feed without calling Heliu
   let calls = 0;
   globalThis.fetch = async () => { calls += 1; throw new Error('The public route must not call Helius.'); };
   try {
-    const sample = { source: 'helius-rpc-parsed-events', asOf: new Date().toISOString(), slot: 123, transactions: Array.from({ length: 20 }, (_, index) => ({ signature: `sig-${index}`, slot: 123, blockTime: '2026-10-06T00:00:00.000Z', status: 'confirmed', action: index === 0 ? 'swap' : null })) };
-    const response = await worker.fetch(new Request('https://api.example/v3/transactions/recent?limit=15'), env({ HELIUS_API_KEY: 'h', SNAPSHOTS: { get: async (key) => key === 'transactions:v3:recent' ? sample : null, put: async () => {} } }), {});
+    const sample = { source: 'helius-rpc', asOf: new Date().toISOString(), slot: 123, network: { source: 'helius-rpc', fetchedAt: new Date().toISOString(), chain: { state: 'fresh', processedSlot: 121, confirmedSlot: 123, blockHeight: 100, epoch: 1 }, performance: { state: 'fresh', tps: 100, nonVoteTps: 80 }, fees: { state: 'fresh', averageFeeLamports: 5000 } }, transactions: Array.from({ length: 20 }, (_, index) => ({ signature: `sig-${index}`, slot: 123, blockTime: '2026-10-06T00:00:00.000Z', status: 'confirmed', action: index === 0 ? 'swap' : null })) };
+    const response = await worker.fetch(new Request('https://api.example/v3/transactions/recent?limit=15'), env({ HELIUS_API_KEY: 'h', SNAPSHOTS: { get: async (key) => key === 'helius:v3:dashboard' ? sample : null, put: async () => {} } }), {});
     const body = await response.json();
     assert.equal(response.status, 200); assert.equal(body.data.transactions.length, 15);
-    assert.equal(body.data.transactions[0].action, 'swap'); assert.equal(body.meta.recentTransactions.sampled, true); assert.equal(calls, 0);
+    assert.equal(body.data.transactions[0].action, 'swap'); assert.equal(body.data.network.chain.confirmedSlot, 123); assert.equal(body.meta.recentTransactions.sampled, true); assert.equal(calls, 0);
     const invalid = await worker.fetch(new Request('https://api.example/v3/transactions/recent?limit=21'), env(), {});
     assert.equal(invalid.status, 400); assert.equal((await invalid.json()).error.code, 'INVALID_RECENT_TRANSACTION_LIMIT');
   } finally { globalThis.fetch = originalFetch; }

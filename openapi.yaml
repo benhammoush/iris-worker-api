@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 3.8.0
+  version: 3.9.0
 paths:
   /internal/refresh:
     post:
@@ -116,7 +116,7 @@ paths:
       parameters:
         - { in: query, name: limit, schema: { type: integer, minimum: 10, maximum: 20, default: 15 } }
       responses:
-        '200': { description: Representative signature sample from one recent confirmed block. Requests refresh it at most once per 15 seconds while active, with the Worker Cron as a one-minute backstop. Helius Parsed Events actions are nullable and do not block a block-sample refresh. This is not a complete chain-wide transaction feed., content: { application/json: { schema: { $ref: '#/components/schemas/RecentTransactionsEnvelope' } } } }
+        '200': { description: Representative signature sample and the Home Helius network metrics. Requests refresh both at most once per 15 seconds while active, with the Worker Cron as a one-minute no-traffic backstop. Helius Parsed Events actions are nullable and do not block a block-sample refresh. This is not a complete chain-wide transaction feed., content: { application/json: { schema: { $ref: '#/components/schemas/RecentTransactionsEnvelope' } } } }
         '400': { description: INVALID_RECENT_TRANSACTION_LIMIT, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
 components:
   schemas:
@@ -208,7 +208,7 @@ components:
       allOf:
         - { $ref: '#/components/schemas/Envelope' }
         - type: object
-          properties: { data: { type: object, properties: { transactions: { type: array, items: { $ref: '#/components/schemas/RecentTransaction' } } } } }
+          properties: { data: { type: object, required: [network, transactions], properties: { network: { type: object, required: [source, fetchedAt, chain, performance, fees], properties: { source: { type: string }, fetchedAt: { type: [string, 'null'], format: date-time }, chain: { type: object, required: [state, asOf, processedSlot, confirmedSlot, blockHeight, epoch], properties: { state: { type: string, enum: [fresh, stale, unavailable] }, asOf: { type: [string, 'null'], format: date-time }, processedSlot: { type: [integer, 'null'] }, confirmedSlot: { type: [integer, 'null'] }, blockHeight: { type: [integer, 'null'] }, epoch: { type: [integer, 'null'] } } }, performance: { type: object, required: [state, asOf, tps, nonVoteTps], properties: { state: { type: string, enum: [fresh, stale, unavailable] }, asOf: { type: [string, 'null'], format: date-time }, tps: { type: [number, 'null'] }, nonVoteTps: { type: [number, 'null'] } } }, fees: { type: object, required: [state, asOf, averageFeeLamports], properties: { state: { type: string, enum: [fresh, stale, unavailable] }, asOf: { type: [string, 'null'], format: date-time }, averageFeeLamports: { type: [number, 'null'] } } } } }, transactions: { type: array, items: { $ref: '#/components/schemas/RecentTransaction' } } } } }
     RecentTransaction:
       required: [signature, slot, blockTime, status, action]
       properties:
