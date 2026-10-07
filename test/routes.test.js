@@ -54,6 +54,26 @@ test('v3 catalogs returns the snapshot-backed Jupiter list shape', async () => {
   assert.deepEqual(body.data.recent, []);
 });
 
+test('v3 asset on-chain and holder routes expose Helius data separately from market data', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    if (request.method === 'getAsset') return { ok: true, json: async () => ({ result: { interface: 'FungibleToken', content: { metadata: { name: 'Solana' } }, token_info: { decimals: 9, supply: '1', token_program: 'Tokenkeg' } } }) };
+    if (request.method === 'getTokenSupply') return { ok: true, json: async () => ({ result: { value: { amount: '1' } } }) };
+    if (request.method === 'getAccountInfo') return { ok: true, json: async () => ({ result: { value: { data: { parsed: { info: { decimals: 9 } } } } } }) };
+    if (request.method === 'getTokenAccounts') return { ok: true, json: async () => ({ result: { total: 1, items: [] } }) };
+    throw new Error(`Unexpected ${request.method}`);
+  };
+  try {
+    const onchain = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/onchain`), env({ HELIUS_API_KEY: 'h' }), {});
+    const holders = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/holders?page=1`), env({ HELIUS_API_KEY: 'h' }), {});
+    assert.equal(onchain.status, 200); assert.equal((await onchain.json()).meta.onchain.source, 'helius');
+    assert.equal(holders.status, 200); assert.equal((await holders.json()).meta.holders.derived, false);
+    const invalid = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/holders?page=0`), env({ HELIUS_API_KEY: 'h' }), {});
+    assert.equal(invalid.status, 400); assert.equal((await invalid.json()).error.code, 'INVALID_HOLDER_PAGE');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('v3 DefiLlama returns its independently cached dashboard data', async () => {
   const dashboard = { source: 'defillama', fetchedAt: new Date().toISOString(), dexes: { total24hUsd: 10, total7dUsd: 20, items: [{ name: 'Raydium', slug: 'raydium', total24hUsd: 10, total7dUsd: 20, change1dPct: 1 }] }, protocols: { total: 1, items: [{ name: 'Jupiter', slug: 'jupiter', category: 'DEX', solanaTvlUsd: 30, change1dPct: 2, change7dPct: 3 }] } };
   const response = await worker.fetch(new Request('https://api.example/v3/defillama'), env({ SNAPSHOTS: { get: async (key) => key === 'defillama:v3:dashboard' ? dashboard : null } }), {});

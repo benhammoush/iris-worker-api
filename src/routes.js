@@ -3,7 +3,7 @@ import { error, json } from './http.js';
 import { candlePlan, fetchCandles, legacyHistoryPlan, mapV3Asset, tokenByMint } from './market.js';
 import { isUsableSnapshot, loadWalletData, resolveSnapshot } from './snapshot.js';
 import { isBase58PublicKey } from './transforms.js';
-import { loadV3Events, loadV3Wallet, mapV3HistoryPoints, v3Asset } from './v3.js';
+import { loadV3AssetHolders, loadV3AssetOnchain, loadV3Events, loadV3Wallet, mapV3HistoryPoints, v3Asset } from './v3.js';
 import { loadHeliusDashboardSample } from './recentTransactions.js';
 import { loadDefiLlamaDashboard } from './defillama.js';
 
@@ -101,11 +101,27 @@ export async function route(request, env, config, id, origin) {
     const suffix = url.pathname.slice('/v3/assets/mint/'.length);
     const historySuffix = suffix.endsWith('/history');
     const candleSuffix = suffix.endsWith('/candles');
-    const encodedMint = historySuffix ? suffix.slice(0, -'/history'.length) : candleSuffix ? suffix.slice(0, -'/candles'.length) : suffix;
+    const onchainSuffix = suffix.endsWith('/onchain');
+    const holdersSuffix = suffix.endsWith('/holders');
+    const encodedMint = historySuffix ? suffix.slice(0, -'/history'.length) : candleSuffix ? suffix.slice(0, -'/candles'.length) : onchainSuffix ? suffix.slice(0, -'/onchain'.length) : holdersSuffix ? suffix.slice(0, -'/holders'.length) : suffix;
     let mint;
     try { mint = decodeURIComponent(encodedMint); } catch { return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin); }
     if (!mint || mint.includes('/') || !isBase58PublicKey(mint)) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
     if (!encodedMint || encodedMint.includes('/')) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
+    if (onchainSuffix) {
+      try {
+        const result = await loadV3AssetOnchain(env, config, mint);
+        return json({ data: result.profile, meta: { ...v3Meta(meta), onchain: { source: 'helius', ...result.freshness } } }, 200, id, origin, snapshotHeaders);
+      } catch (cause) { return error(cause.code || 'ASSET_ONCHAIN_UNAVAILABLE', 'On-chain asset data is currently unavailable.', 503, id, origin); }
+    }
+    if (holdersSuffix) {
+      const page = url.searchParams.get('page') === null ? 1 : Number(url.searchParams.get('page'));
+      if (!Number.isSafeInteger(page) || page < 1) return error('INVALID_HOLDER_PAGE', 'page must be a positive integer.', 400, id, origin);
+      try {
+        const result = await loadV3AssetHolders(env, config, mint, page);
+        return json({ data: result, meta: { ...v3Meta(meta), holders: { source: 'helius', derived: false } } }, 200, id, origin, snapshotHeaders);
+      } catch (cause) { return error(cause.code || 'ASSET_ONCHAIN_UNAVAILABLE', 'On-chain holder data is currently unavailable.', 503, id, origin); }
+    }
     let asset = snapshot.assets.find((item) => item.mint === mint);
     if (!asset) {
       try {

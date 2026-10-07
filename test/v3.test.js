@@ -4,7 +4,7 @@ import worker from '../src/index.js';
 import { SOL_MINT } from '../src/constants.js';
 import { mapV3Asset } from '../src/market.js';
 import { historyForAsset } from '../src/routes.js';
-import { loadV3Wallet, mapDasWallet, mapV3Event, mapV3HistoryPoints } from '../src/v3.js';
+import { loadV3AssetHolders, loadV3AssetOnchain, loadV3Wallet, mapDasWallet, mapV3Event, mapV3HistoryPoints } from '../src/v3.js';
 import { loadHeliusDashboardSample, loadRecentTransactionSample, refreshHeliusDashboardSample, refreshRecentTransactionSample } from '../src/recentTransactions.js';
 
 function env(overrides = {}) { return { CORS_ORIGINS: 'https://app.example', SNAPSHOTS: { get: async () => null, put: async () => {} }, ...overrides }; }
@@ -82,6 +82,35 @@ test('v3 Parsed Events mapping preserves string raw amounts and rejects unsafe n
   const event = mapV3Event({ parserStatus: 'OK', signature: 'signature', parsed: { transactionStatus: 'OK', nativeTransfers: [{ amount: '9007199254740993123' }, { amount: Number.MAX_SAFE_INTEGER + 1 }], tokenTransfers: [{ mint: SOL_MINT, rawTokenAmount: { tokenAmount: '2500000', decimals: 6 } }, { mint: SOL_MINT, rawTokenAmount: '7', decimals: 9 }] } });
   assert.equal(event.transfers.native[0].atomicAmount, '9007199254740993123'); assert.equal(event.transfers.native[1].atomicAmount, null);
   assert.equal(event.transfers.tokens[0].atomicAmount, '2500000'); assert.equal(event.transfers.tokens[0].decimals, 6); assert.equal(event.transfers.tokens[1].atomicAmount, '7');
+});
+
+test('Helius on-chain profile preserves atomic supply and exposes only provider-backed mint fields', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    if (request.method === 'getAsset') return { ok: true, json: async () => ({ result: { interface: 'FungibleToken', last_indexed_slot: 123, mutable: false, content: { json_uri: 'https://metadata.example', links: { image: 'https://image.example' }, metadata: { name: 'Example', symbol: 'EX', description: 'An example', external_url: 'https://example.com' } }, token_info: { decimals: 6, supply: '9007199254740993123', mint_authority: 'mint-authority', freeze_authority: null, token_program: 'Tokenkeg', extensions: ['transferFeeConfig'] } } }) };
+    if (request.method === 'getTokenSupply') return { ok: true, json: async () => ({ result: { value: { amount: '9007199254740993123' } } }) };
+    if (request.method === 'getAccountInfo') return { ok: true, json: async () => ({ result: { value: { data: { parsed: { info: { decimals: 6 } } } } } }) };
+    throw new Error(`Unexpected ${request.method}`);
+  };
+  try {
+    const { profile, freshness } = await loadV3AssetOnchain(env({ HELIUS_API_KEY: 'h' }), {}, SOL_MINT);
+    assert.deepEqual(profile.mintState, { decimals: 6, supplyAtomic: '9007199254740993123', supply: '9007199254740.993123', mintAuthority: 'mint-authority', freezeAuthority: null, isMutable: false, extensions: ['transferFeeConfig'] });
+    assert.equal(profile.metadata.name, 'Example'); assert.equal(freshness.cacheState, 'miss');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('Helius holder pages preserve atomic balances without claiming unique holders', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    assert.deepEqual(request.params, { mint: SOL_MINT, page: 2, limit: 25, options: { showZeroBalance: false } });
+    return { ok: true, json: async () => ({ result: { total: 31, cursor: 'cursor', items: [{ id: 'token-account', ownership: { owner: 'owner' }, frozen: false, token_info: { balance: '2500000', decimals: 6 } }] } }) };
+  };
+  try {
+    const page = await loadV3AssetHolders(env({ HELIUS_API_KEY: 'h' }), {}, SOL_MINT, 2);
+    assert.deepEqual(page, { holders: [{ tokenAccount: 'token-account', owner: 'owner', atomicAmount: '2500000', amount: '2.5', decimals: 6, frozen: false, delegated: null }], page: 2, total: 31, cursor: 'cursor' });
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test('v3 history negative-caches unavailable Birdeye responses', async () => {
