@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import worker from '../src/index.js';
 import { SOL_MINT } from '../src/constants.js';
 import { mapV3Asset } from '../src/market.js';
-import { historyForAsset } from '../src/routes.js';
+import { candlesForAsset, historyForAsset } from '../src/routes.js';
 import { loadV3AssetDistribution, loadV3AssetHolders, loadV3AssetOnchain, loadV3AssetTransactions, loadV3Wallet, mapDasWallet, mapV3Event, mapV3HistoryPoints } from '../src/v3.js';
 import { loadHeliusDashboardSample, loadRecentTransactionSample, refreshHeliusDashboardSample, refreshRecentTransactionSample } from '../src/recentTransactions.js';
 
@@ -57,6 +57,17 @@ test('v3 candle pagination requests the preceding provider window and rejects in
     const invalidTimeframe = await worker.fetch(new Request(`https://api.example/v3/assets/mint/${SOL_MINT}/candles?timeframe=1h`), env({ BIRDEYE_API_KEY: 'key' }), {});
     assert.equal(invalidTimeframe.status, 400);
     assert.equal((await invalidTimeframe.json()).error.code, 'INVALID_CANDLE_TIMEFRAME');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('candle cache records expire after the existing stale window', async () => {
+  const originalFetch = globalThis.fetch;
+  const writes = [];
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ success: true, data: { items: [{ unix_time: 1_760_000_000, o: 1, h: 2, l: 1, c: 2, v: 3, v_usd: 6 }] } }) });
+  try {
+    await candlesForAsset({ get: async () => null, put: async (key, value, options) => writes.push({ key, value, options }) }, SOL_MINT, 'key', '1H');
+    assert.equal(writes.length, 1);
+    assert.deepEqual(writes[0].options, { expirationTtl: 86_400 });
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -194,10 +205,10 @@ test('recent transaction samples batch parsed actions, preserve signature order,
     const second = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 10_000), true);
     assert.equal(first.freshness, 'fresh'); assert.deepEqual(first.transactions, [{ signature: 'sig-a', slot: 123, blockTime: '2025-10-09T08:53:20.000Z', status: 'confirmed', action: 'swap' }, { signature: 'sig-b', slot: 123, blockTime: '2025-10-09T08:53:20.000Z', status: 'confirmed', action: 'create_account' }]);
     assert.equal(second.freshness, 'fresh'); assert.equal(calls, 3);
-    const refreshed = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 16_000), true);
+    const refreshed = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 61_000), true);
     assert.equal(refreshed.freshness, 'fresh'); assert.equal(calls, 6);
     globalThis.fetch = async () => { throw new Error('provider unavailable'); };
-    const stale = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 32_000), true);
+    const stale = await loadRecentTransactionSample(env({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'h' }), {}, new Date(now.getTime() + 122_000), true);
     assert.equal(stale.freshness, 'stale'); assert.equal(stale.transactions.length, 2);
   } finally { globalThis.fetch = originalFetch; }
 });
@@ -219,7 +230,7 @@ test('recent transaction samples remain fresh when Parsed Events is unavailable'
   } finally { globalThis.fetch = originalFetch; console.warn = originalWarn; }
 });
 
-test('Helius dashboard samples combine the 15-second transaction and requested network metrics', async () => {
+test('Helius dashboard samples combine the 60-second transaction and requested network metrics', async () => {
   const cache = new Map(); const snapshots = { get: async (key) => cache.get(key) || null, put: async (key, value) => cache.set(key, JSON.parse(value)) };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, options) => {

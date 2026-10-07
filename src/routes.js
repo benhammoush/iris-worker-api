@@ -25,11 +25,11 @@ export async function candlesForAsset(kv, mint, apiKey, timeframe = '1H', endTim
     if (!result) {
       if (age >= 0 && age <= STALE_AFTER_MS && usableCandles(cached)) return { candles: cached.candles, timeframe: cached.timeframe || plan.timeframe, state: 'stale', fetchedAt: cached.fetchedAt, source: 'birdeye' };
       const fetchedAt = new Date().toISOString();
-      if (kv?.put) await kv.put(key, JSON.stringify({ version: 2, mint, source: 'birdeye', timeframe: plan.timeframe, count: CANDLE_PAGE_SIZE, fetchedAt, unavailable: true }));
+      if (kv?.put) await kv.put(key, JSON.stringify({ version: 2, mint, source: 'birdeye', timeframe: plan.timeframe, count: CANDLE_PAGE_SIZE, fetchedAt, unavailable: true }), { expirationTtl: Math.ceil(STALE_AFTER_MS / 1000) });
       return { candles: null, timeframe: plan.timeframe, state: 'unavailable', fetchedAt, source: 'birdeye' };
     }
     const fetchedAt = new Date().toISOString();
-    if (kv?.put) await kv.put(key, JSON.stringify({ version: 2, mint, source: 'birdeye', timeframe: result.timeframe, count: CANDLE_PAGE_SIZE, fetchedAt, candles: result.candles }));
+    if (kv?.put) await kv.put(key, JSON.stringify({ version: 2, mint, source: 'birdeye', timeframe: result.timeframe, count: CANDLE_PAGE_SIZE, fetchedAt, candles: result.candles }), { expirationTtl: Math.ceil(STALE_AFTER_MS / 1000) });
     return { candles: result.candles, timeframe: result.timeframe, state: 'fresh', fetchedAt, source: 'birdeye' };
   } catch (cause) {
     console.warn('Birdeye candles unavailable', { mint, message: cause.message });
@@ -76,7 +76,12 @@ export async function route(request, env, config, id, origin) {
     refreshIntervalMinutes: REFRESH_INTERVAL_MINUTES,
     nextScheduledRefreshAt: new Date((Math.floor(Date.now() / REFRESH_INTERVAL_MS) + 1) * REFRESH_INTERVAL_MS).toISOString()
   };
-  const snapshotHeaders = { 'cache-control': 'no-store', 'x-snapshot-state': state };
+  const cacheHeaders = (maxAge, staleWhileRevalidate) => ({ 'cache-control': `public, max-age=${maxAge}, s-maxage=${maxAge}, stale-while-revalidate=${staleWhileRevalidate}`, vary: 'Origin', 'x-snapshot-state': state });
+  const snapshotHeaders = cacheHeaders(60, 300);
+  const dashboardHeaders = cacheHeaders(60, 60);
+  const defillamaHeaders = cacheHeaders(300, 900);
+  const candleHeaders = cacheHeaders(1800, 86400);
+  const noStoreSnapshotHeaders = { 'cache-control': 'no-store', 'x-snapshot-state': state };
   if (url.pathname === '/v3/status') return json({ data: { version: API_VERSION, chain: 'solana', provenance: { snapshot: snapshot.source, market: snapshot.market.source, reviewedSwaps: snapshot.market.swaps?.source ?? 'unknown' }, freshness: { snapshot: state, snapshotCreatedAt: snapshot.createdAt, marketDataAsOf: snapshot.market.asOf }, reviewedSwaps: { scope: snapshot.market.swaps?.scope ?? 'registered-liquid-pools', count: snapshot.market.swaps?.count ?? snapshot.swaps.length } }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v3/network') return json({ data: snapshot.network || { source: 'fixture', fetchedAt: null, chain: { state: 'unavailable', asOf: null }, performance: { state: 'unavailable', asOf: null }, production: { state: 'unavailable', asOf: null }, fees: { state: 'unavailable', asOf: null }, validators: { state: 'unavailable', asOf: null }, economics: { state: 'unavailable', asOf: null }, reliability: { state: 'unavailable', asOf: null } }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v3/assets') return json({ data: snapshot.assets.map(v3Asset), meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
@@ -87,7 +92,7 @@ export async function route(request, env, config, id, origin) {
   if (url.pathname === '/v3/defillama') {
     const { dashboard, state: freshness } = await loadDefiLlamaDashboard(env.SNAPSHOTS);
     const data = dashboard || { source: 'defillama', fetchedAt: null, dexes: { total24hUsd: null, total7dUsd: null, items: [] }, protocols: { total: 0, items: [] } };
-    return json({ data, meta: { ...v3Meta(meta), defillama: { source: 'defillama', freshness, fetchedAt: data.fetchedAt } } }, 200, id, origin, snapshotHeaders);
+    return json({ data, meta: { ...v3Meta(meta), defillama: { source: 'defillama', freshness, fetchedAt: data.fetchedAt } } }, 200, id, origin, defillamaHeaders);
   }
   if (url.pathname === '/v3/swaps') return json({ data: { scope: snapshot.market.swaps?.scope ?? 'registered-liquid-pools', swaps: snapshot.swaps.map(v3Swap) }, meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders);
   if (url.pathname === '/v3/transactions/recent') {
@@ -95,7 +100,7 @@ export async function route(request, env, config, id, origin) {
     const limit = rawLimit === null ? 15 : Number(rawLimit);
     if (!Number.isInteger(limit) || limit < 10 || limit > 20) return error('INVALID_RECENT_TRANSACTION_LIMIT', 'limit must be an integer from 10 to 20.', 400, id, origin);
     const sample = await loadHeliusDashboardSample(env, config, new Date(), true);
-    return json({ data: { network: sample.network, transactions: sample.transactions.slice(0, limit) }, meta: { ...v3Meta(meta), recentTransactions: { source: sample.source, freshness: sample.transactionsFreshness ?? sample.freshness, asOf: sample.transactionAsOf ?? sample.asOf, slot: sample.slot, sampled: true, limit }, network: { source: sample.network.source, freshness: { chain: sample.network.chain.state, performance: sample.network.performance.state, fees: sample.network.fees.state }, asOf: sample.network.fetchedAt } } }, 200, id, origin, snapshotHeaders);
+    return json({ data: { network: sample.network, transactions: sample.transactions.slice(0, limit) }, meta: { ...v3Meta(meta), recentTransactions: { source: sample.source, freshness: sample.transactionsFreshness ?? sample.freshness, asOf: sample.transactionAsOf ?? sample.asOf, slot: sample.slot, sampled: true, limit }, network: { source: sample.network.source, freshness: { chain: sample.network.chain.state, performance: sample.network.performance.state, fees: sample.network.fees.state }, asOf: sample.network.fetchedAt } } }, 200, id, origin, dashboardHeaders);
   }
   if (url.pathname.startsWith('/v3/assets/mint/')) {
     const suffix = url.pathname.slice('/v3/assets/mint/'.length);
@@ -113,7 +118,7 @@ export async function route(request, env, config, id, origin) {
     if (onchainSuffix) {
       try {
         const result = await loadV3AssetOnchain(env, config, mint);
-        return json({ data: result.profile, meta: { ...v3Meta(meta), onchain: { source: 'helius', ...result.freshness } } }, 200, id, origin, snapshotHeaders);
+        return json({ data: result.profile, meta: { ...v3Meta(meta), onchain: { source: 'helius', ...result.freshness } } }, 200, id, origin, noStoreSnapshotHeaders);
       } catch (cause) { return error(cause.code || 'ASSET_ONCHAIN_UNAVAILABLE', 'On-chain asset data is currently unavailable.', 503, id, origin); }
     }
     if (holdersSuffix) {
@@ -121,13 +126,13 @@ export async function route(request, env, config, id, origin) {
       if (!Number.isSafeInteger(page) || page < 1) return error('INVALID_HOLDER_PAGE', 'page must be a positive integer.', 400, id, origin);
       try {
         const result = await loadV3AssetHolders(env, config, mint, page);
-        return json({ data: result, meta: { ...v3Meta(meta), holders: { source: 'helius', derived: false } } }, 200, id, origin, snapshotHeaders);
+        return json({ data: result, meta: { ...v3Meta(meta), holders: { source: 'helius', derived: false } } }, 200, id, origin, noStoreSnapshotHeaders);
       } catch (cause) { return error(cause.code || 'ASSET_ONCHAIN_UNAVAILABLE', 'On-chain holder data is currently unavailable.', 503, id, origin); }
     }
     if (distributionSuffix) {
       try {
         const result = await loadV3AssetDistribution(env, config, mint);
-        return json({ data: result, meta: { ...v3Meta(meta), distribution: { source: 'helius', derived: false } } }, 200, id, origin, snapshotHeaders);
+        return json({ data: result, meta: { ...v3Meta(meta), distribution: { source: 'helius', derived: false } } }, 200, id, origin, noStoreSnapshotHeaders);
       } catch (cause) { return error(cause.code || 'ASSET_ONCHAIN_UNAVAILABLE', 'On-chain distribution data is currently unavailable.', 503, id, origin); }
     }
     if (transactionsSuffix) {
@@ -138,7 +143,7 @@ export async function route(request, env, config, id, origin) {
       if (cursor !== null && !cursor) return error('INVALID_ASSET_TRANSACTION_CURSOR', 'cursor must not be empty.', 400, id, origin);
       try {
         const result = await loadV3AssetTransactions(env, config, mint, limit, cursor);
-        return json({ data: result, meta: { ...v3Meta(meta), assetTransactions: { source: 'helius-parsed-events', scope: 'mint-address-history', limit } } }, 200, id, origin, snapshotHeaders);
+        return json({ data: result, meta: { ...v3Meta(meta), assetTransactions: { source: 'helius-parsed-events', scope: 'mint-address-history', limit } } }, 200, id, origin, noStoreSnapshotHeaders);
       } catch (cause) { return error(cause.code || 'ASSET_ONCHAIN_UNAVAILABLE', 'On-chain transaction data is currently unavailable.', 503, id, origin); }
     }
     let asset = snapshot.assets.find((item) => item.mint === mint);
@@ -162,14 +167,14 @@ export async function route(request, env, config, id, origin) {
       const timeframe = url.searchParams.get('timeframe') || '1H';
       if (!candlePlan(timeframe)) return error('INVALID_CANDLE_TIMEFRAME', 'timeframe must be an exact supported Birdeye candle timeframe.', 400, id, origin);
       const candles = await candlesForAsset(env.SNAPSHOTS, mint, config.birdeyeApiKey, timeframe, endTimestamp);
-      return json({ data: { mint, timeframe: candles.timeframe, count: CANDLE_PAGE_SIZE, candles: candles.candles }, meta: v3Meta(meta, candles) }, 200, id, origin, snapshotHeaders);
+      return json({ data: { mint, timeframe: candles.timeframe, count: CANDLE_PAGE_SIZE, candles: candles.candles }, meta: v3Meta(meta, candles) }, 200, id, origin, candleHeaders);
     }
     const range = url.searchParams.get('range') || '7d';
     if (!legacyHistoryPlan(range)) return error('INVALID_HISTORY_RANGE', 'range must be 1d or 7d.', 400, id, origin);
     const history = await historyForAsset(env.SNAPSHOTS, mint, config.birdeyeApiKey, range);
     const points = mapV3HistoryPoints(history.points);
-    if (historySuffix) return json({ data: { mint, range, points }, meta: v3Meta(meta, history) }, 200, id, origin, snapshotHeaders);
-    return json({ data: { ...v3Asset(asset), history: { points, state: state === 'fixture' ? 'fixture' : history.state, fetchedAt: history.fetchedAt } }, meta: v3Meta(meta, history) }, 200, id, origin, snapshotHeaders);
+    if (historySuffix) return json({ data: { mint, range, points }, meta: v3Meta(meta, history) }, 200, id, origin, candleHeaders);
+    return json({ data: { ...v3Asset(asset), history: { points, state: state === 'fixture' ? 'fixture' : history.state, fetchedAt: history.fetchedAt } }, meta: v3Meta(meta, history) }, 200, id, origin, candleHeaders);
   }
   if (url.pathname.startsWith('/v3/wallets/')) {
     const suffix = url.pathname.slice('/v3/wallets/'.length);
@@ -186,9 +191,9 @@ export async function route(request, env, config, id, origin) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 100) return error('INVALID_EVENT_LIMIT', 'limit must be an integer from 1 to 100.', 400, id, origin);
       const cursor = url.searchParams.get('cursor');
       if (cursor !== null && !cursor) return error('INVALID_EVENT_CURSOR', 'cursor must not be empty.', 400, id, origin);
-      try { return json({ data: await loadV3Events(env, config, address, limit, cursor), meta: v3Meta(meta) }, 200, id, origin, snapshotHeaders); } catch (cause) { return error(cause.code || 'WALLET_LOOKUP_UNAVAILABLE', 'Public wallet data is currently unavailable.', 503, id, origin); }
+      try { return json({ data: await loadV3Events(env, config, address, limit, cursor), meta: v3Meta(meta) }, 200, id, origin, noStoreSnapshotHeaders); } catch (cause) { return error(cause.code || 'WALLET_LOOKUP_UNAVAILABLE', 'Public wallet data is currently unavailable.', 503, id, origin); }
     }
-    try { const result = await loadV3Wallet(env, config, address); return json({ data: result.wallet, meta: { ...v3Meta(meta), wallet: { source: 'helius-das', ...result.freshness } } }, 200, id, origin, snapshotHeaders); } catch (cause) { return error(cause.code || 'WALLET_LOOKUP_UNAVAILABLE', 'Public wallet data is currently unavailable.', 503, id, origin); }
+    try { const result = await loadV3Wallet(env, config, address); return json({ data: result.wallet, meta: { ...v3Meta(meta), wallet: { source: 'helius-das', ...result.freshness } } }, 200, id, origin, noStoreSnapshotHeaders); } catch (cause) { return error(cause.code || 'WALLET_LOOKUP_UNAVAILABLE', 'Public wallet data is currently unavailable.', 503, id, origin); }
   }
   const versionPrefix = url.pathname.startsWith('/v2/') ? '/v2' : url.pathname.startsWith('/v1/') ? '/v1' : null;
   if (!versionPrefix) return error('NOT_FOUND', 'Route was not found.', 404, id, origin);
@@ -226,7 +231,7 @@ export async function route(request, env, config, id, origin) {
     if (!isBase58PublicKey(address)) return error('INVALID_WALLET_ADDRESS', 'Wallet address is invalid.', 400, id, origin);
     try {
       const wallet = await loadWalletData(env, config, address);
-      return json({ data: wallet, meta: { ...meta, walletDataSource: 'helius-live' } }, 200, id, origin, snapshotHeaders);
+      return json({ data: wallet, meta: { ...meta, walletDataSource: 'helius-live' } }, 200, id, origin, noStoreSnapshotHeaders);
     } catch (cause) {
       if (cause.code === 'WALLET_LOOKUP_UNAVAILABLE') return error(cause.code, 'Public wallet lookup is unavailable until Helius is configured.', 503, id, origin);
       console.warn('wallet lookup unavailable', { address, message: cause.message });

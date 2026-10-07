@@ -50,7 +50,7 @@ export async function refreshDefiLlamaDashboard(kv, now = new Date()) {
   if (!protocolResponse.ok) throw new Error(`DefiLlama protocol request failed with ${protocolResponse.status}`);
   const [dexPayload, protocolPayload] = await Promise.all([dexResponse.json(), protocolResponse.json()]);
   const dashboard = { source: 'defillama', fetchedAt: now.toISOString(), dexes: dexesFrom(dexPayload), protocols: protocolsFrom(protocolPayload) };
-  if (kv?.put) await kv.put(DEFILLAMA_DASHBOARD_KEY, JSON.stringify(dashboard));
+  if (kv?.put) await kv.put(DEFILLAMA_DASHBOARD_KEY, JSON.stringify(dashboard), { expirationTtl: Math.ceil(STALE_AFTER_MS / 1000) });
   return dashboard;
 }
 

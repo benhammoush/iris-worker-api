@@ -1,4 +1,4 @@
-export const API_VERSION = '3.14.0';
+export const API_VERSION = '3.14.1';
 export const CHAIN = 'solana';
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const SNAPSHOT_POINTER_KEY = 'snapshot:current';
@@ -20,7 +20,7 @@ export const V3_ASSET_ONCHAIN_CACHE_SECONDS = 300;
 export const V3_ASSET_HOLDER_PAGE_SIZE = 25;
 export const V3_ASSET_TRANSACTION_PAGE_SIZE = 25;
 export const V3_ASSET_DISTRIBUTION_SIZE = 20;
-export const V3_RECENT_TRANSACTIONS_FRESH_AFTER_MS = 15 * 1000;
+export const V3_RECENT_TRANSACTIONS_FRESH_AFTER_MS = 60 * 1000;
 export const V3_RECENT_TRANSACTIONS_KEY = 'transactions:v3:recent';
 export const V3_RECENT_TRANSACTIONS_MAX = 20;
 export const V3_HELIUS_DASHBOARD_KEY = 'helius:v3:dashboard';

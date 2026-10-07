@@ -23,7 +23,7 @@ test('refresh normalizes, filters, sorts, and caches Solana DefiLlama data', asy
     ] };
   };
   try {
-    const dashboard = await refreshDefiLlamaDashboard({ put: async (key, value) => writes.set(key, value) }, new Date('2026-10-06T00:00:00.000Z'));
+    const dashboard = await refreshDefiLlamaDashboard({ put: async (key, value, options) => writes.set(key, { value, options }) }, new Date('2026-10-06T00:00:00.000Z'));
     assert.equal(dashboard.dexes.total24hUsd, 30);
     assert.equal(dashboard.dexes.items[0].name, 'Larger');
     assert.equal(dashboard.dexes.items[0].logo, 'https://icons.example/larger');
@@ -31,7 +31,8 @@ test('refresh normalizes, filters, sorts, and caches Solana DefiLlama data', asy
     assert.equal(dashboard.protocols.items.length, 6);
     assert.equal(dashboard.protocols.items[0].solanaTvlUsd, 200);
     assert.equal(dashboard.protocols.items[0].logo, 'https://icons.example/large');
-    assert.equal(JSON.parse(writes.get('defillama:v3:dashboard')).source, 'defillama');
+    assert.equal(JSON.parse(writes.get('defillama:v3:dashboard').value).source, 'defillama');
+    assert.deepEqual(writes.get('defillama:v3:dashboard').options, { expirationTtl: 86_400 });
   } finally { globalThis.fetch = originalFetch; }
 });
 

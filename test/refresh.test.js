@@ -44,7 +44,7 @@ test('refresh does not publish a new fixture when Helius is not configured', asy
 test('refresh preserves reviewed swaps when a tracked Helius pool refresh fails', async () => {
   const previous = { ...FIXTURE_SNAPSHOT, createdAt: '2026-10-02T12:00:00.000Z', source: 'helius-jupiter', market: { ...FIXTURE_SNAPSHOT.market, asOf: '2026-10-02T12:00:00.000Z' }, swaps: [{ id: 'previous-swap' }] };
   const writes = new Map();
-  const snapshots = { get: async (key) => key === 'snapshot:current' ? { key: 'snapshot:previous' } : previous, put: async (key, value) => writes.set(key, value) };
+  const snapshots = { get: async (key) => key === 'snapshot:current' ? { key: 'snapshot:previous' } : previous, put: async (key, value, options) => writes.set(key, { value, options }) };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, options = {}) => {
     const value = String(url);
@@ -57,5 +57,7 @@ test('refresh preserves reviewed swaps when a tracked Helius pool refresh fails'
   try {
     const refreshed = await refreshSnapshot({ SNAPSHOTS: snapshots, HELIUS_API_KEY: 'helius', JUPITER_API_KEY: 'jupiter' }, { heliusApiKey: 'helius', jupiterApiKey: 'jupiter' }, new Date('2026-10-02T12:01:00.000Z'));
     assert.deepEqual(refreshed.swaps, previous.swaps); assert.equal(writes.size, 2);
+    const snapshotWrite = [...writes.entries()].find(([key]) => key.startsWith('snapshot:v2:'))[1];
+    assert.deepEqual(snapshotWrite.options, { expirationTtl: 86_400 });
   } finally { globalThis.fetch = originalFetch; }
 });

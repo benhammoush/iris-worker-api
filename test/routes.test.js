@@ -38,11 +38,11 @@ test('v2 is canonical and v1 remains an asset route alias', async () => {
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test('fixture responses preserve cache, CORS, and snapshot envelopes', async () => {
+test('fixture responses are publicly cached with CORS-safe variation and snapshot envelopes', async () => {
   const response = await worker.fetch(new Request('https://api.example/v2/assets', { headers: { origin: 'https://app.example' } }), env(), {});
   const body = await response.json();
   assert.equal(body.meta.snapshotState, 'fixture'); assert.equal(body.data.length, 3);
-  assert.equal(response.headers.get('cache-control'), 'no-store'); assert.equal(response.headers.get('access-control-allow-origin'), 'https://app.example');
+  assert.equal(response.headers.get('cache-control'), 'public, max-age=60, s-maxage=60, stale-while-revalidate=300'); assert.equal(response.headers.get('access-control-allow-origin'), 'https://app.example'); assert.equal(response.headers.get('vary'), 'Origin');
 });
 
 test('v3 catalogs returns the snapshot-backed Jupiter list shape', async () => {
@@ -81,6 +81,7 @@ test('v3 DefiLlama returns its independently cached dashboard data', async () =>
   assert.equal(response.status, 200);
   assert.equal(body.data.dexes.items[0].slug, 'raydium');
   assert.equal(body.meta.defillama.freshness, 'fresh');
+  assert.equal(response.headers.get('cache-control'), 'public, max-age=300, s-maxage=300, stale-while-revalidate=900');
 });
 
 test('v3 network returns an explicit unavailable fixture without fabricating metrics', async () => {
@@ -101,6 +102,7 @@ test('v3 recent transactions returns a bounded cached feed without calling Heliu
     const body = await response.json();
     assert.equal(response.status, 200); assert.equal(body.data.transactions.length, 15);
     assert.equal(body.data.transactions[0].action, 'swap'); assert.equal(body.data.network.chain.confirmedSlot, 123); assert.equal(body.meta.recentTransactions.sampled, true); assert.equal(calls, 0);
+    assert.equal(response.headers.get('cache-control'), 'public, max-age=60, s-maxage=60, stale-while-revalidate=60');
     const invalid = await worker.fetch(new Request('https://api.example/v3/transactions/recent?limit=21'), env(), {});
     assert.equal(invalid.status, 400); assert.equal((await invalid.json()).error.code, 'INVALID_RECENT_TRANSACTION_LIMIT');
   } finally { globalThis.fetch = originalFetch; }

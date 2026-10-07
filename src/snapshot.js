@@ -163,7 +163,7 @@ export async function refreshSnapshot(env, config, now = new Date()) {
   const swaps = trackedPoolResult.sort((left, right) => String(right.timestamp ?? '').localeCompare(String(left.timestamp ?? ''))).slice(0, MAX_SWAPS);
   const snapshot = { version: 2, createdAt: now.toISOString(), source: 'helius-jupiter', market: { fees: null, slot: network.chain?.finalizedSlot ?? null, block_height: network.chain?.blockHeight ?? null, source: market.source, asOf: market.asOf, historySource: null, liveAssetCount: market.liveAssetCount, swaps: { count: swaps.length, asOf: new Date().toISOString(), source: 'helius-decoded-tracked-pools', scope: 'registered-liquid-pools', error: null }, history: [] }, network, assets, catalogs: { topTraded: assets, ...discoveryCatalogs }, wallets, swaps };
   const key = `${SNAPSHOT_KEY_PREFIX}${now.getTime()}`;
-  await env.SNAPSHOTS.put(key, JSON.stringify(snapshot));
+  await env.SNAPSHOTS.put(key, JSON.stringify(snapshot), { expirationTtl: Math.ceil(STALE_AFTER_MS / 1000) });
   await env.SNAPSHOTS.put(SNAPSHOT_POINTER_KEY, JSON.stringify({ key, createdAt: snapshot.createdAt }));
   return snapshot;
 }

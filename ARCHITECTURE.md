@@ -12,7 +12,7 @@ flowchart TB
     Router["Routes\n/ Home\n/assets Catalog\n/wallets Catalog\n/asset/:mint Asset\n/wallet/:address Wallet"]
     Views["Page components\nHome, Catalog, Asset, Wallet\nNavbar, DataStatus"]
     AssetView["Asset intelligence view\nJupiter metrics\nBirdeye candles\nHelius profile + mint history + largest accounts"]
-    Contexts["Global resources\nCatalog: /v3/assets\nHelius dashboard: /v3/transactions/recent?limit=15\n15-second polling"]
+    Contexts["Global resources\nCatalog: /v3/assets\nHelius dashboard: /v3/transactions/recent?limit=15\n60-second visible-tab polling"]
     Hook["useWorkerResource\nAbort obsolete request\nKeep prior data while refreshing"]
     WorkerApi["src/api/worker.js\nCanonical Worker route methods"]
     Client["src/api/client.js\nVITE_API_BASE\nX-Request-Id\n10s timeout\n{ data, meta } validation\nApiError normalization"]
@@ -31,7 +31,7 @@ flowchart TB
       Candles["candles:v2:birdeye:mint:timeframe:300:usd:end\n30m fresh / 24h stale"]
       Onchain["asset:v3:onchain:mint\n300s TTL"]
       Wallets["wallet:v3:address\n60s TTL"]
-      Dashboard["helius:v3:dashboard\ntransactions:v3:recent\n15s fresh / 24h stale"]
+      Dashboard["helius:v3:dashboard\ntransactions:v3:recent\n60s fresh / 24h stale"]
       DefiCache["defillama:v3:dashboard\n1h fresh / 24h stale"]
     end
 
@@ -87,7 +87,7 @@ flowchart TB
 | Frontend surface | Request(s) | Data shown | Provider behind Worker |
 | --- | --- | --- | --- |
 | `CatalogProvider` / navbar | `GET /v3/assets` | Core catalog and Solana navbar market summary | Jupiter snapshot |
-| `HeliusDashboardProvider` | `GET /v3/transactions/recent?limit=15` every 15 seconds | Recent sampled transactions, TPS, non-vote TPS, average fee | Helius |
+| `HeliusDashboardProvider` | `GET /v3/transactions/recent?limit=15` every 60 seconds while visible; reload once on visibility return | Recent sampled transactions, TPS, non-vote TPS, average fee | Helius |
 | `Home` | `/v3/catalogs`, `/v3/defillama` and selected asset detail | Jupiter discovery, DefiLlama aggregate DEX/protocol cards | Jupiter, DefiLlama |
 | `Asset` | `/v3/assets/mint/:mint?includeHistory=false` | Identity, market metrics, activity, audit indicators | Jupiter |
 | `Asset` chart | `/v3/assets/mint/:mint/candles?timeframe=<native>` | USD OHLCV and volume | Birdeye |
@@ -138,7 +138,7 @@ flowchart LR
 1. Cloudflare Cron runs hourly, or CI calls authenticated `POST /internal/refresh` after deployment.
 2. `refreshSnapshot()` fetches Helius network metrics and configured reviewed-pool activity, then fetches the Jupiter market catalog and discovery lists.
 3. The Worker writes a complete `snapshot:v2:<timestamp>` record to KV.
-4. Only after the versioned snapshot write succeeds, the Worker updates `snapshot:current`.
+4. Versioned snapshots, Birdeye candle pages, and DefiLlama dashboard records expire after 24 hours; only after the versioned snapshot write succeeds, the Worker updates `snapshot:current`.
 5. In parallel, best-effort refreshes update the Helius dashboard sample and DefiLlama dashboard. Their failure does not prevent core snapshot publication.
 6. A core refresh failure keeps the last complete snapshot. After the usable lifetime expires, routes fall back to the bundled fixture snapshot rather than inventing data.
 
@@ -163,7 +163,7 @@ flowchart LR
 - `src/api/worker.js` - Worker route methods and controlled fixture fallback.
 - `src/hooks/useWorkerResource.js` - component request lifecycle.
 - `src/contexts/CatalogContext.js` - catalog resource.
-- `src/contexts/HeliusDashboardContext.js` - 15-second network/transaction resource.
+- `src/contexts/HeliusDashboardContext.js` - 60-second visible-tab network/transaction resource.
 - `src/components/Asset.tsx` - market, candles, and Helius token-intelligence composition.
 
 ### Worker repository: `Iris-Worker-Api-Public`
