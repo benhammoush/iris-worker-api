@@ -11,7 +11,7 @@ flowchart TB
     App["src/App.js\nThemeProvider\nCatalogProvider\nHeliusDashboardProvider"]
     Router["Routes\n/ Home\n/assets Catalog\n/wallets Catalog\n/asset/:mint Asset\n/wallet/:address Wallet"]
     Views["Page components\nHome, Catalog, Asset, Wallet\nNavbar, DataStatus"]
-    AssetView["Asset intelligence view\nJupiter metrics\nBirdeye candles\nHelius profile + token accounts"]
+    AssetView["Asset intelligence view\nJupiter metrics\nBirdeye candles\nHelius profile + mint history + largest accounts"]
     Contexts["Global resources\nCatalog: /v3/assets\nHelius dashboard: /v3/transactions/recent?limit=15\n15-second polling"]
     Hook["useWorkerResource\nAbort obsolete request\nKeep prior data while refreshing"]
     WorkerApi["src/api/worker.js\nCanonical Worker route methods"]
@@ -93,7 +93,7 @@ flowchart TB
 | `Asset` chart | `/v3/assets/mint/:mint/candles?timeframe=<native>` | USD OHLCV and volume | Birdeye |
 | `Asset` backward chart pan | Same candle route with `before=<unix-seconds>` | Earlier fixed 300-candle page | Birdeye |
 | `Asset` protocol panel | `/v3/assets/mint/:mint/onchain` | Token program, supply, authorities, mutability, extensions | Helius |
-| `Asset` account panel | `/v3/assets/mint/:mint/holders?page=1` | Indexed non-zero token accounts, not unique holders | Helius |
+| `Asset` intelligence panel | `/v3/assets/mint/:mint/transactions?limit=25`, `/distribution` | Mint-address history and 20 largest token accounts, not a complete token-wide transfer ledger or unique-holder list | Helius |
 | `Wallet` | `/v3/wallets/:address` | Native/SPL/Token-2022 balances and priced subtotal | Helius with optional Jupiter enrichment |
 | `Wallet` activity | `/v3/wallets/:address/transactions?limit=25&cursor=...` | Decoded public wallet events | Helius Parsed Events |
 

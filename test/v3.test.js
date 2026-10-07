@@ -4,7 +4,7 @@ import worker from '../src/index.js';
 import { SOL_MINT } from '../src/constants.js';
 import { mapV3Asset } from '../src/market.js';
 import { historyForAsset } from '../src/routes.js';
-import { loadV3AssetHolders, loadV3AssetOnchain, loadV3Wallet, mapDasWallet, mapV3Event, mapV3HistoryPoints } from '../src/v3.js';
+import { loadV3AssetDistribution, loadV3AssetHolders, loadV3AssetOnchain, loadV3AssetTransactions, loadV3Wallet, mapDasWallet, mapV3Event, mapV3HistoryPoints } from '../src/v3.js';
 import { loadHeliusDashboardSample, loadRecentTransactionSample, refreshHeliusDashboardSample, refreshRecentTransactionSample } from '../src/recentTransactions.js';
 
 function env(overrides = {}) { return { CORS_ORIGINS: 'https://app.example', SNAPSHOTS: { get: async () => null, put: async () => {} }, ...overrides }; }
@@ -104,12 +104,54 @@ test('Helius holder pages preserve atomic balances without claiming unique holde
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, options) => {
     const request = JSON.parse(options.body);
-    assert.deepEqual(request.params, { mint: SOL_MINT, page: 2, limit: 25, options: { showZeroBalance: false } });
-    return { ok: true, json: async () => ({ result: { total: 31, cursor: 'cursor', items: [{ id: 'token-account', ownership: { owner: 'owner' }, frozen: false, token_info: { balance: '2500000', decimals: 6 } }] } }) };
+    if (request.method === 'getTokenAccounts') {
+      assert.deepEqual(request.params, { mint: SOL_MINT, page: 2, limit: 25, options: { showZeroBalance: false } });
+      return { ok: true, json: async () => ({ result: { total: 31, cursor: 'cursor', token_accounts: [{ address: 'token-account', owner: 'owner', amount: '2500000', frozen: false }] } }) };
+    }
+    if (request.method === 'getAsset') return { ok: true, json: async () => ({ result: { token_info: { decimals: 6 } } }) };
+    throw new Error(`Unexpected ${request.method}`);
   };
   try {
     const page = await loadV3AssetHolders(env({ HELIUS_API_KEY: 'h' }), {}, SOL_MINT, 2);
     assert.deepEqual(page, { holders: [{ tokenAccount: 'token-account', owner: 'owner', atomicAmount: '2500000', amount: '2.5', decimals: 6, frozen: false, delegated: null }], page: 2, total: 31, cursor: 'cursor' });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('Helius largest accounts preserve atomic values, parsed owners, and two-decimal supply shares', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    if (request.method === 'getTokenLargestAccounts') return { ok: true, json: async () => ({ result: { context: { slot: 123 }, value: [{ address: 'account-a', amount: '333', decimals: 2 }, { address: 'account-b', amount: '1', decimals: 2 }] } }) };
+    if (request.method === 'getTokenSupply') return { ok: true, json: async () => ({ result: { value: { amount: '1000' } } }) };
+    if (request.method === 'getMultipleAccounts') return { ok: true, json: async () => ({ result: { value: [
+      { data: { parsed: { info: { owner: 'owner-a', state: 'frozen' } } } },
+      { data: { parsed: { info: { owner: 'owner-b', state: 'initialized' } } } }
+    ] } }) };
+    throw new Error(`Unexpected ${request.method}`);
+  };
+  try {
+    const distribution = await loadV3AssetDistribution(env({ HELIUS_API_KEY: 'h' }), {}, SOL_MINT);
+    assert.deepEqual(distribution, { supplyAtomic: '1000', slot: 123, accounts: [
+      { rank: 1, tokenAccount: 'account-a', owner: 'owner-a', atomicAmount: '333', amount: '3.33', decimals: 2, frozen: true, supplyPercent: '33.30' },
+      { rank: 2, tokenAccount: 'account-b', owner: 'owner-b', atomicAmount: '1', amount: '0.01', decimals: 2, frozen: false, supplyPercent: '0.10' }
+    ] });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('Helius mint transaction history preserves all mint-address transactions and filters only transfer details by mint', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    assert.deepEqual(JSON.parse(options.body), { address: SOL_MINT, limit: 25, sortOrder: 'desc', commitment: 'confirmed' });
+    return { ok: true, json: async () => ({ data: [
+      { signature: 'mint-event', parserStatus: 'OK', parsed: { slot: 7, blockTime: 1_760_000_000, transactionStatus: 'OK', summary: { type: 'mint', description: 'Minted', parsedData: { protocol: 'token' } }, tokenTransfers: [{ mint: SOL_MINT, rawTokenAmount: '2500000', decimals: 6, fromUserAccount: null, toUserAccount: 'recipient' }, { mint: 'other', rawTokenAmount: '1', decimals: 0 }] } },
+      { signature: 'metadata-event', parserStatus: 'OK', parsed: { slot: 6, blockTime: 1_759_999_999, transactionStatus: 'OK', summary: null, tokenTransfers: [] } }
+    ], paginationToken: 'next' }) };
+  };
+  try {
+    const page = await loadV3AssetTransactions(env({ HELIUS_API_KEY: 'h' }), {}, SOL_MINT);
+    assert.equal(page.nextCursor, 'next'); assert.equal(page.transactions.length, 2);
+    assert.deepEqual(page.transactions[0].transfers, [{ from: null, to: 'recipient', fromTokenAccount: null, toTokenAccount: null, atomicAmount: '2500000', amount: '2.5', decimals: 6 }]);
+    assert.equal(page.transactions[1].action, null);
   } finally { globalThis.fetch = originalFetch; }
 });
 

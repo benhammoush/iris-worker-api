@@ -3,7 +3,7 @@ import { error, json } from './http.js';
 import { candlePlan, fetchCandles, legacyHistoryPlan, mapV3Asset, tokenByMint } from './market.js';
 import { isUsableSnapshot, loadWalletData, resolveSnapshot } from './snapshot.js';
 import { isBase58PublicKey } from './transforms.js';
-import { loadV3AssetHolders, loadV3AssetOnchain, loadV3Events, loadV3Wallet, mapV3HistoryPoints, v3Asset } from './v3.js';
+import { loadV3AssetDistribution, loadV3AssetHolders, loadV3AssetOnchain, loadV3AssetTransactions, loadV3Events, loadV3Wallet, mapV3HistoryPoints, v3Asset } from './v3.js';
 import { loadHeliusDashboardSample } from './recentTransactions.js';
 import { loadDefiLlamaDashboard } from './defillama.js';
 
@@ -103,7 +103,9 @@ export async function route(request, env, config, id, origin) {
     const candleSuffix = suffix.endsWith('/candles');
     const onchainSuffix = suffix.endsWith('/onchain');
     const holdersSuffix = suffix.endsWith('/holders');
-    const encodedMint = historySuffix ? suffix.slice(0, -'/history'.length) : candleSuffix ? suffix.slice(0, -'/candles'.length) : onchainSuffix ? suffix.slice(0, -'/onchain'.length) : holdersSuffix ? suffix.slice(0, -'/holders'.length) : suffix;
+    const distributionSuffix = suffix.endsWith('/distribution');
+    const transactionsSuffix = suffix.endsWith('/transactions');
+    const encodedMint = historySuffix ? suffix.slice(0, -'/history'.length) : candleSuffix ? suffix.slice(0, -'/candles'.length) : onchainSuffix ? suffix.slice(0, -'/onchain'.length) : holdersSuffix ? suffix.slice(0, -'/holders'.length) : distributionSuffix ? suffix.slice(0, -'/distribution'.length) : transactionsSuffix ? suffix.slice(0, -'/transactions'.length) : suffix;
     let mint;
     try { mint = decodeURIComponent(encodedMint); } catch { return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin); }
     if (!mint || mint.includes('/') || !isBase58PublicKey(mint)) return error('ASSET_NOT_FOUND', 'Asset was not found.', 404, id, origin);
@@ -121,6 +123,23 @@ export async function route(request, env, config, id, origin) {
         const result = await loadV3AssetHolders(env, config, mint, page);
         return json({ data: result, meta: { ...v3Meta(meta), holders: { source: 'helius', derived: false } } }, 200, id, origin, snapshotHeaders);
       } catch (cause) { return error(cause.code || 'ASSET_ONCHAIN_UNAVAILABLE', 'On-chain holder data is currently unavailable.', 503, id, origin); }
+    }
+    if (distributionSuffix) {
+      try {
+        const result = await loadV3AssetDistribution(env, config, mint);
+        return json({ data: result, meta: { ...v3Meta(meta), distribution: { source: 'helius', derived: false } } }, 200, id, origin, snapshotHeaders);
+      } catch (cause) { return error(cause.code || 'ASSET_ONCHAIN_UNAVAILABLE', 'On-chain distribution data is currently unavailable.', 503, id, origin); }
+    }
+    if (transactionsSuffix) {
+      const rawLimit = url.searchParams.get('limit');
+      const limit = rawLimit === null ? 25 : Number(rawLimit);
+      const cursor = url.searchParams.get('cursor');
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) return error('INVALID_ASSET_TRANSACTION_LIMIT', 'limit must be an integer from 1 to 100.', 400, id, origin);
+      if (cursor !== null && !cursor) return error('INVALID_ASSET_TRANSACTION_CURSOR', 'cursor must not be empty.', 400, id, origin);
+      try {
+        const result = await loadV3AssetTransactions(env, config, mint, limit, cursor);
+        return json({ data: result, meta: { ...v3Meta(meta), assetTransactions: { source: 'helius-parsed-events', scope: 'mint-address-history', limit } } }, 200, id, origin, snapshotHeaders);
+      } catch (cause) { return error(cause.code || 'ASSET_ONCHAIN_UNAVAILABLE', 'On-chain transaction data is currently unavailable.', 503, id, origin); }
     }
     let asset = snapshot.assets.find((item) => item.mint === mint);
     if (!asset) {

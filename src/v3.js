@@ -1,4 +1,4 @@
-import { SOL_MINT, V3_ASSET_HOLDER_PAGE_SIZE, V3_ASSET_ONCHAIN_CACHE_SECONDS, V3_WALLET_CACHE_SECONDS, V3_WALLET_KEY_PREFIX } from './constants.js';
+import { SOL_MINT, V3_ASSET_DISTRIBUTION_SIZE, V3_ASSET_HOLDER_PAGE_SIZE, V3_ASSET_ONCHAIN_CACHE_SECONDS, V3_ASSET_TRANSACTION_PAGE_SIZE, V3_WALLET_CACHE_SECONDS, V3_WALLET_KEY_PREFIX } from './constants.js';
 import { refreshMarket } from './market.js';
 import { decimalValue, formatAtomicAmount } from './transforms.js';
 
@@ -89,6 +89,37 @@ function holderFromDas(item) {
   };
 }
 
+function holderFromTokenAccount(item, decimals) {
+  const atomicAmount = atomicString(item?.amount);
+  if (!atomicAmount || !Number.isInteger(decimals) || decimals < 0) return null;
+  return {
+    tokenAccount: stringOrNull(item?.address), owner: stringOrNull(item?.owner), atomicAmount,
+    amount: formatAtomicAmount(atomicAmount, decimals), decimals,
+    frozen: typeof item?.frozen === 'boolean' ? item.frozen : null,
+    delegated: atomicString(item?.delegated_amount)
+  };
+}
+
+function percentageOfSupply(amount, supply) {
+  if (!/^\d+$/.test(amount || '') || !/^\d+$/.test(supply || '') || supply === '0') return null;
+  // Round half up to two decimal places without converting atomic token values to Number.
+  const hundredths = (BigInt(amount) * 10_000n + BigInt(supply) / 2n) / BigInt(supply);
+  return `${hundredths / 100n}.${String(hundredths % 100n).padStart(2, '0')}`;
+}
+
+function largestAccountFromRpc(item, account, supplyAtomic) {
+  const atomicAmount = atomicString(item?.amount);
+  const decimals = Number.isInteger(item?.decimals) && item.decimals >= 0 ? item.decimals : null;
+  const parsed = account?.data?.parsed?.info || {};
+  if (!atomicAmount || decimals === null) return null;
+  return {
+    tokenAccount: stringOrNull(item?.address), owner: stringOrNull(parsed.owner), atomicAmount,
+    amount: formatAtomicAmount(atomicAmount, decimals), decimals,
+    frozen: typeof parsed.state === 'string' ? parsed.state === 'frozen' : null,
+    supplyPercent: percentageOfSupply(atomicAmount, supplyAtomic)
+  };
+}
+
 export async function loadV3AssetOnchain(env, config, mint) {
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
   if (!apiKey) { const cause = new Error('Helius is not configured.'); cause.code = 'ASSET_ONCHAIN_UNAVAILABLE'; throw cause; }
@@ -109,9 +140,34 @@ export async function loadV3AssetOnchain(env, config, mint) {
 export async function loadV3AssetHolders(env, config, mint, page = 1) {
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
   if (!apiKey) { const cause = new Error('Helius is not configured.'); cause.code = 'ASSET_ONCHAIN_UNAVAILABLE'; throw cause; }
-  const result = await heliusRpc('getTokenAccounts', { mint, page, limit: V3_ASSET_HOLDER_PAGE_SIZE, options: { showZeroBalance: false } }, apiKey);
-  const items = Array.isArray(result?.items) ? result.items.map(holderFromDas).filter(Boolean) : [];
+  const [result, asset] = await Promise.all([
+    heliusRpc('getTokenAccounts', { mint, page, limit: V3_ASSET_HOLDER_PAGE_SIZE, options: { showZeroBalance: false } }, apiKey),
+    heliusRpc('getAsset', { id: mint, options: { showFungible: true } }, apiKey)
+  ]);
+  const decimals = Number.isInteger(asset?.token_info?.decimals) ? asset.token_info.decimals : null;
+  const items = Array.isArray(result?.token_accounts)
+    ? result.token_accounts.map((item) => holderFromTokenAccount(item, decimals)).filter(Boolean)
+    : Array.isArray(result?.items) ? result.items.map(holderFromDas).filter(Boolean) : [];
   return { holders: items, page, total: Number.isInteger(result?.total) && result.total >= 0 ? result.total : null, cursor: stringOrNull(result?.cursor) };
+}
+
+export async function loadV3AssetDistribution(env, config, mint) {
+  const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
+  if (!apiKey) { const cause = new Error('Helius is not configured.'); cause.code = 'ASSET_ONCHAIN_UNAVAILABLE'; throw cause; }
+  const [largest, supply] = await Promise.all([
+    heliusRpc('getTokenLargestAccounts', [mint, { commitment: 'confirmed' }], apiKey),
+    heliusRpc('getTokenSupply', [mint, { commitment: 'confirmed' }], apiKey)
+  ]);
+  const accounts = Array.isArray(largest?.value) ? largest.value.slice(0, V3_ASSET_DISTRIBUTION_SIZE) : [];
+  const addresses = accounts.map((item) => item?.address).filter((address) => typeof address === 'string');
+  const details = addresses.length ? await heliusRpc('getMultipleAccounts', [addresses, { encoding: 'jsonParsed', commitment: 'confirmed' }], apiKey) : null;
+  const byAddress = new Map(addresses.map((address, index) => [address, details?.value?.[index] || null]));
+  const supplyAtomic = atomicString(supply?.value?.amount);
+  return {
+    accounts: accounts.map((item, index) => ({ rank: index + 1, ...largestAccountFromRpc(item, byAddress.get(item?.address), supplyAtomic) })).filter((item) => item.tokenAccount),
+    supplyAtomic,
+    slot: Number.isSafeInteger(largest?.context?.slot) ? largest.context.slot : null
+  };
 }
 
 async function parsedEvents(address, apiKey, limit, cursor) {
@@ -121,6 +177,32 @@ async function parsedEvents(address, apiKey, limit, cursor) {
   if (!response.ok) throw new Error(`Helius parsed events request failed with ${response.status}`);
   const page = await response.json();
   return { data: Array.isArray(page?.data) ? page.data : [], paginationToken: typeof page?.paginationToken === 'string' ? page.paginationToken : null };
+}
+
+function transferFromParsed(transfer, mint) {
+  const atomicAmount = atomicString(transfer?.rawTokenAmount ?? transfer?.tokenAmount ?? transfer?.amount);
+  const decimals = Number.isInteger(transfer?.decimals) && transfer.decimals >= 0 ? transfer.decimals : null;
+  if (transfer?.mint !== mint || !atomicAmount || decimals === null) return null;
+  return { from: stringOrNull(transfer?.fromUserAccount), to: stringOrNull(transfer?.toUserAccount), fromTokenAccount: stringOrNull(transfer?.fromTokenAccount), toTokenAccount: stringOrNull(transfer?.toTokenAccount), atomicAmount, amount: formatAtomicAmount(atomicAmount, decimals), decimals };
+}
+
+function assetTransactionFrom(event, mint) {
+  const parsed = event?.parsed || {};
+  const transfers = (Array.isArray(parsed.tokenTransfers) ? parsed.tokenTransfers : []).map((transfer) => transferFromParsed(transfer, mint)).filter(Boolean);
+  return {
+    signature: stringOrNull(event?.signature), slot: Number.isSafeInteger(parsed?.slot) ? parsed.slot : null,
+    timestamp: Number.isFinite(parsed?.blockTime) ? new Date(parsed.blockTime * 1000).toISOString() : null,
+    status: parsed?.transactionStatus === 'OK' ? 'success' : parsed?.transactionStatus === 'ERROR' ? 'failed' : null,
+    action: stringOrNull(parsed?.summary?.type) || stringOrNull(parsed?.instructions?.[0]?.instructionName),
+    protocol: stringOrNull(parsed?.summary?.parsedData?.protocol), summary: stringOrNull(parsed?.summary?.description), transfers
+  };
+}
+
+export async function loadV3AssetTransactions(env, config, mint, limit = V3_ASSET_TRANSACTION_PAGE_SIZE, cursor = null) {
+  const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
+  if (!apiKey) { const cause = new Error('Helius is not configured.'); cause.code = 'ASSET_ONCHAIN_UNAVAILABLE'; throw cause; }
+  const page = await parsedEvents(mint, apiKey, limit, cursor);
+  return { transactions: page.data.map((event) => assetTransactionFrom(event, mint)).filter((transaction) => transaction.signature), nextCursor: page.paginationToken };
 }
 
 function dasHolding(item) {
