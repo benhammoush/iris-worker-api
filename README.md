@@ -2,6 +2,10 @@
 
 Cloudflare Worker API for cached Solana market data and on-demand public-wallet lookups. It is native JavaScript and uses Cloudflare KV only; it does not use Express, D1, or R2.
 
+## System Architecture
+
+See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the detailed frontend-to-Worker organigram, route mapping, provider boundaries, caches, refresh sequence, and failure behavior.
+
 ## Local development
 
 1. Run `npm install`.
