@@ -14,8 +14,10 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
-      - run: npm test
+       - run: npm ci
+      - run: npm run check:versions
+      - run: npm run lint:openapi
+       - run: npm test
       - run: npm run check
 
   deploy:

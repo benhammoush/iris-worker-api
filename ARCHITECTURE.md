@@ -21,7 +21,7 @@ flowchart TB
 
   subgraph Edge["Cloudflare Worker - Iris API"]
     Entry["src/index.js\nfetch + scheduled entrypoints"]
-    Security["CORS origin check\nOPTIONS\nGET-only public API\nPOST /internal/refresh bearer token"]
+    Security["CORS origin check\nOPTIONS preflight\nGET-only public API\nPOST /internal/refresh bearer token"]
     Dispatcher["src/routes.js\n/v3 route validation\nJSON envelopes\nprovenance + freshness metadata"]
     Scheduler["Hourly Cron\n0 * * * *"]
     Refresh["Refresh coordinators\nrefreshSnapshot\nrefreshHeliusDashboardSample\nrefreshDefiLlamaDashboard"]
@@ -96,6 +96,10 @@ flowchart TB
 | `Asset` intelligence panel | `/v3/assets/mint/:mint/transactions?limit=25`, `/distribution` | Mint-address history and 20 largest token accounts, not a complete token-wide transfer ledger or unique-holder list | Helius |
 | `Wallet` | `/v3/wallets/:address` | Native/SPL/Token-2022 balances and priced subtotal | Helius with optional Jupiter enrichment |
 | `Wallet` activity | `/v3/wallets/:address/transactions?limit=25&cursor=...` | Decoded public wallet events | Helius Parsed Events |
+
+## API Contract And Compatibility
+
+`/v3` is the canonical public API contract and is described completely in `openapi.yaml`. `/v1` and `/v2` remain operational but deprecated compatibility surfaces. The Worker package version, runtime API version, and OpenAPI `info.version` are kept identical and validated in CI. Public routes accept `GET`; `OPTIONS` supports browser preflight, and the operator-only `POST /internal/refresh` endpoint requires its separate refresh bearer token.
 
 ## Worker Route, Cache, And Failure Flow
 

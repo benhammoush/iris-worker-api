@@ -24,7 +24,7 @@ test('protected refresh publishes the snapshot when the optional dashboard cache
   } finally { console.warn = originalWarn; globalThis.fetch = originalFetch; }
 });
 
-test('v2 is canonical and v1 remains an asset route alias', async () => {
+test('deprecated v1 and v2 asset routes remain compatibility aliases', async () => {
   const originalFetch = globalThis.fetch;
   const timestamp = Math.floor(Date.now() / 1000);
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ success: true, data: { items: [{ unix_time: timestamp, o: 149, h: 151, l: 148, c: 150, v: 1, v_usd: 150 }] } }) });

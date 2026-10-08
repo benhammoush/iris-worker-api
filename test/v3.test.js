@@ -178,11 +178,12 @@ test('v3 history negative-caches unavailable Birdeye responses', async () => {
 });
 
 test('v3 history preserves a stale seven-day Birdeye candle cache when the provider reports unavailable', async () => {
-  const cached = { fetchedAt: new Date(Date.now() - (31 * 60 * 1000)).toISOString(), interval: '1H', candles: [{ timestamp: '2026-10-01T00:00:00.000Z', openUsd: 1, highUsd: 1, lowUsd: 1, closeUsd: 1, volume: 1, volumeUsd: 1 }] };
+  const timestamp = new Date(Date.now() - (60 * 60 * 1000)).toISOString();
+  const cached = { fetchedAt: new Date(Date.now() - (31 * 60 * 1000)).toISOString(), interval: '1H', candles: [{ timestamp, openUsd: 1, highUsd: 1, lowUsd: 1, closeUsd: 1, volume: 1, volumeUsd: 1 }] };
   const originalFetch = globalThis.fetch; globalThis.fetch = async () => ({ ok: true, json: async () => ({ success: true, data: { items: [] } }) });
   try {
     const history = await historyForAsset({ get: async () => cached }, SOL_MINT, 'key');
-    assert.equal(history.state, 'stale'); assert.deepEqual(history.points, [{ date: '2026-10-01T00:00:00.000Z', price: 1 }]);
+    assert.equal(history.state, 'stale'); assert.deepEqual(history.points, [{ date: timestamp, price: 1 }]);
   } finally { globalThis.fetch = originalFetch; }
 });
 

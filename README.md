@@ -18,7 +18,7 @@ Any valid public Solana address can be looked up; Iris never requests wallet sig
 
 ## Deployment
 
-Pushes to `main` automatically deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret. Set `HELIUS_API_KEY`, `JUPITER_API_KEY`, and `BIRDEYE_API_KEY` as Worker secrets. The deploy job invokes the protected `/internal/refresh` endpoint using the `IRIS_REFRESH_TOKEN` GitHub secret, which must match the Worker `REFRESH_TOKEN` secret.
+Pushes to `main` deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret; the workflow explicitly reports a skipped deployment when that secret is absent. Set `HELIUS_API_KEY`, `JUPITER_API_KEY`, and `BIRDEYE_API_KEY` as Worker secrets. The deploy job invokes the protected `/internal/refresh` endpoint using the `IRIS_REFRESH_TOKEN` GitHub secret, which must match the Worker `REFRESH_TOKEN` secret.
 
 ## Market data
 
@@ -34,6 +34,6 @@ The production Cron runs at the start of every hour. Each run refreshes the comp
 
 ## API versions
 
-`/v3` is the canonical contract. It exposes Jupiter asset fields, Birdeye candles, compatibility history points, reviewed-pool swaps, and DAS wallet balances. `/v2` and `/v1` remain transitional aliases during frontend migration.
+`/v3` is the canonical contract. It exposes Jupiter asset fields, Birdeye candles, compatibility history points, reviewed-pool swaps, and DAS wallet balances. `/v2` and `/v1` remain supported but deprecated compatibility surfaces. The `/v3/wallets/:address/events` route is also deprecated; use `/v3/wallets/:address/transactions` instead.
 
-Responses are JSON envelopes with `meta.requestId`; errors use `error.code`. Snapshot responses include freshness metadata and are `Cache-Control: no-store`. See `openapi.yaml` for the API contract.
+Responses are JSON envelopes with `meta.requestId`; errors use `error.code`. Snapshot-backed routes include freshness metadata and use public cache-control headers; on-demand wallet and on-chain routes use `Cache-Control: no-store`. See `openapi.yaml` for the complete API contract. The Worker package version, runtime API version, and OpenAPI version are validated together in CI.
