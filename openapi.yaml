@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Iris API
-  version: 3.14.2
+  version: 3.14.3
   license:
     name: ISC
     identifier: ISC
