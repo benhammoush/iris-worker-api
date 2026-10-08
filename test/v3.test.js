@@ -91,7 +91,7 @@ test('v3 history rejects unsupported ranges', async () => {
 
 test('v3 Parsed Events mapping preserves string raw amounts and rejects unsafe numbers', () => {
   const event = mapV3Event({ parserStatus: 'OK', signature: 'signature', parsed: { transactionStatus: 'OK', nativeTransfers: [{ amount: '9007199254740993123' }, { amount: Number.MAX_SAFE_INTEGER + 1 }], tokenTransfers: [{ mint: SOL_MINT, rawTokenAmount: { tokenAmount: '2500000', decimals: 6 } }, { mint: SOL_MINT, rawTokenAmount: '7', decimals: 9 }] } });
-  assert.equal(event.transfers.native[0].atomicAmount, '9007199254740993123'); assert.equal(event.transfers.native[1].atomicAmount, null);
+  assert.equal(event.transfers.native[0].atomicAmount, '9007199254740993123'); assert.equal(event.transfers.native[0].decimals, 9); assert.equal(event.transfers.native[1].atomicAmount, null);
   assert.equal(event.transfers.tokens[0].atomicAmount, '2500000'); assert.equal(event.transfers.tokens[0].decimals, 6); assert.equal(event.transfers.tokens[1].atomicAmount, '7');
 });
 
@@ -317,5 +317,36 @@ test('v3 wallet cache, transaction pagination defaults, CORS, and v2 compatibili
     assert.equal(malformed.status, 404); assert.equal((await malformed.json()).error.code, 'NOT_FOUND');
     const v2 = await worker.fetch(new Request('https://api.example/v2/assets'), env({ SNAPSHOTS: snapshots }), {});
     assert.equal(v2.status, 200); assert.ok(Array.isArray((await v2.json()).data));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('cache-only mode serves all seeded v3 on-chain and wallet records without provider access', async () => {
+  const walletAddress = '7Yk4L5M6N7P8Q9R2tB6dF8gH1jK4L5M6N7P8Q9R2tB6d';
+  const now = new Date().toISOString();
+  const records = new Map([
+    [`asset:v3:onchain:${SOL_MINT}`, { asOf: now, profile: { mint: SOL_MINT } }],
+    [`asset:v3:holders:${SOL_MINT}:1`, { asOf: now, page: 1, holders: [] }],
+    [`asset:v3:distribution:${SOL_MINT}`, { asOf: now, accounts: [] }],
+    [`asset:v3:transactions:${SOL_MINT}:50:initial`, { asOf: now, transactions: [], nextCursor: null }],
+    [`wallet:v3:${walletAddress}`, { asOf: now, wallet: { address: walletAddress, balances: [], valuation: {} } }],
+    [`wallet:v3:events:${walletAddress}:25:initial`, { asOf: now, events: [], nextCursor: 'next-page' }],
+    [`wallet:v3:events:${walletAddress}:25:next-page`, { asOf: now, events: [], nextCursor: null }]
+  ]);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('cache-only mode must not call a provider'); };
+  const seededEnv = env({ PROVIDER_MODE: 'cache-only', SNAPSHOTS: { get: async (key) => records.get(key) || null } });
+  try {
+    for (const path of [
+      `/v3/assets/mint/${SOL_MINT}/onchain`,
+      `/v3/assets/mint/${SOL_MINT}/holders?page=1`,
+      `/v3/assets/mint/${SOL_MINT}/distribution`,
+      `/v3/assets/mint/${SOL_MINT}/transactions?limit=50`,
+      `/v3/wallets/${walletAddress}`,
+      `/v3/wallets/${walletAddress}/transactions`,
+      `/v3/wallets/${walletAddress}/transactions?cursor=next-page`
+    ]) {
+      const response = await worker.fetch(new Request(`https://api.example${path}`), seededEnv, {});
+      assert.equal(response.status, 200, path);
+    }
   } finally { globalThis.fetch = originalFetch; }
 });

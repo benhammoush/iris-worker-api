@@ -1,4 +1,4 @@
-import { SOL_MINT, V3_ASSET_DISTRIBUTION_SIZE, V3_ASSET_HOLDER_PAGE_SIZE, V3_ASSET_ONCHAIN_CACHE_SECONDS, V3_ASSET_TRANSACTION_PAGE_SIZE, V3_WALLET_CACHE_SECONDS, V3_WALLET_KEY_PREFIX } from './constants.js';
+import { SOL_MINT, V3_ASSET_DISTRIBUTION_KEY_PREFIX, V3_ASSET_DISTRIBUTION_SIZE, V3_ASSET_HOLDER_PAGE_SIZE, V3_ASSET_HOLDERS_KEY_PREFIX, V3_ASSET_ONCHAIN_CACHE_SECONDS, V3_ASSET_TRANSACTION_PAGE_SIZE, V3_ASSET_TRANSACTIONS_KEY_PREFIX, V3_WALLET_CACHE_SECONDS, V3_WALLET_EVENTS_KEY_PREFIX, V3_WALLET_KEY_PREFIX } from './constants.js';
 import { refreshMarket } from './market.js';
 import { decimalValue, formatAtomicAmount } from './transforms.js';
 
@@ -47,6 +47,19 @@ function stringOrNull(value) {
 
 function atomicString(value) {
   return typeof value === 'string' && /^\d+$/.test(value) ? value : typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? String(value) : null;
+}
+
+async function cachedValue(env, key, validate) {
+  const cached = env.SNAPSHOTS?.get ? await env.SNAPSHOTS.get(key, 'json') : null;
+  return validate(cached) ? cached : null;
+}
+
+function cachedFreshness(asOf) {
+  return { cacheState: 'fresh', asOf };
+}
+
+function cacheOnly(config) {
+  return config.providerMode === 'cache-only';
 }
 
 function assetOnchainProfile(mint, asset, supply, account) {
@@ -121,11 +134,12 @@ function largestAccountFromRpc(item, account, supplyAtomic) {
 }
 
 export async function loadV3AssetOnchain(env, config, mint) {
+  const key = `asset:v3:onchain:${mint}`;
+  const cached = await cachedValue(env, key, (value) => value?.profile?.mint === mint && Number.isFinite(Date.parse(value.asOf)));
+  if (cached) return { profile: cached.profile, freshness: cachedFreshness(cached.asOf) };
+  if (cacheOnly(config)) { const cause = new Error('Seeded on-chain asset data is unavailable.'); cause.code = 'ASSET_ONCHAIN_UNAVAILABLE'; throw cause; }
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
   if (!apiKey) { const cause = new Error('Helius is not configured.'); cause.code = 'ASSET_ONCHAIN_UNAVAILABLE'; throw cause; }
-  const key = `asset:v3:onchain:${mint}`;
-  const cached = env.SNAPSHOTS?.get ? await env.SNAPSHOTS.get(key, 'json') : null;
-  if (cached?.profile?.mint === mint && Number.isFinite(Date.parse(cached.asOf))) return { profile: cached.profile, freshness: { cacheState: 'fresh', asOf: cached.asOf } };
   const [asset, supply, account] = await Promise.all([
     heliusRpc('getAsset', { id: mint }, apiKey),
     heliusRpc('getTokenSupply', [mint], apiKey),
@@ -138,6 +152,10 @@ export async function loadV3AssetOnchain(env, config, mint) {
 }
 
 export async function loadV3AssetHolders(env, config, mint, page = 1) {
+  const key = `${V3_ASSET_HOLDERS_KEY_PREFIX}${mint}:${page}`;
+  const cached = await cachedValue(env, key, (value) => value?.page === page && Array.isArray(value.holders) && Number.isFinite(Date.parse(value.asOf)));
+  if (cached) return { holders: cached.holders, page: cached.page, total: cached.total ?? null, cursor: cached.cursor ?? null };
+  if (cacheOnly(config)) { const cause = new Error('Seeded asset holder data is unavailable.'); cause.code = 'ASSET_ONCHAIN_UNAVAILABLE'; throw cause; }
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
   if (!apiKey) { const cause = new Error('Helius is not configured.'); cause.code = 'ASSET_ONCHAIN_UNAVAILABLE'; throw cause; }
   const [result, asset] = await Promise.all([
@@ -152,6 +170,10 @@ export async function loadV3AssetHolders(env, config, mint, page = 1) {
 }
 
 export async function loadV3AssetDistribution(env, config, mint) {
+  const key = `${V3_ASSET_DISTRIBUTION_KEY_PREFIX}${mint}`;
+  const cached = await cachedValue(env, key, (value) => Array.isArray(value?.accounts) && Number.isFinite(Date.parse(value.asOf)));
+  if (cached) return { accounts: cached.accounts, supplyAtomic: cached.supplyAtomic ?? null, slot: cached.slot ?? null };
+  if (cacheOnly(config)) { const cause = new Error('Seeded asset distribution data is unavailable.'); cause.code = 'ASSET_ONCHAIN_UNAVAILABLE'; throw cause; }
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
   if (!apiKey) { const cause = new Error('Helius is not configured.'); cause.code = 'ASSET_ONCHAIN_UNAVAILABLE'; throw cause; }
   const [largest, supply] = await Promise.all([
@@ -199,6 +221,10 @@ function assetTransactionFrom(event, mint) {
 }
 
 export async function loadV3AssetTransactions(env, config, mint, limit = V3_ASSET_TRANSACTION_PAGE_SIZE, cursor = null) {
+  const key = `${V3_ASSET_TRANSACTIONS_KEY_PREFIX}${mint}:${limit}:${cursor || 'initial'}`;
+  const cached = await cachedValue(env, key, (value) => Array.isArray(value?.transactions) && Number.isFinite(Date.parse(value.asOf)));
+  if (cached) return { transactions: cached.transactions, nextCursor: cached.nextCursor ?? null };
+  if (cacheOnly(config)) { const cause = new Error('Seeded asset transaction data is unavailable.'); cause.code = 'ASSET_ONCHAIN_UNAVAILABLE'; throw cause; }
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
   if (!apiKey) { const cause = new Error('Helius is not configured.'); cause.code = 'ASSET_ONCHAIN_UNAVAILABLE'; throw cause; }
   const page = await parsedEvents(mint, apiKey, limit, cursor);
@@ -238,11 +264,12 @@ export function mapDasWallet(address, result, marketAssets) {
 }
 
 export async function loadV3Wallet(env, config, address, marketRefresh = refreshMarket) {
+  const key = `${V3_WALLET_KEY_PREFIX}${address}`;
+  const cached = await cachedValue(env, key, (value) => value?.wallet?.address === address && Number.isFinite(Date.parse(value.asOf)));
+  if (cached) return { wallet: cached.wallet, freshness: cachedFreshness(cached.asOf) };
+  if (cacheOnly(config)) { const cause = new Error('Seeded wallet data is unavailable.'); cause.code = 'WALLET_LOOKUP_UNAVAILABLE'; throw cause; }
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
   if (!apiKey) { const cause = new Error('Helius is not configured.'); cause.code = 'WALLET_LOOKUP_UNAVAILABLE'; throw cause; }
-  const key = `${V3_WALLET_KEY_PREFIX}${address}`;
-  const cached = env.SNAPSHOTS?.get ? await env.SNAPSHOTS.get(key, 'json') : null;
-  if (cached?.wallet?.address === address && Number.isFinite(Date.parse(cached.asOf))) return { wallet: cached.wallet, freshness: { cacheState: 'fresh', asOf: cached.asOf } };
   const result = await heliusRpc('getAssetsByOwner', { ownerAddress: address, page: 1, limit: 100, displayOptions: { showFungible: true, showNativeBalance: true, showGrandTotal: true } }, apiKey);
   const mints = (Array.isArray(result?.items) ? result.items : []).map((item) => item?.id).filter((mint) => typeof mint === 'string').slice(0, 40);
   if (!mints.includes(SOL_MINT)) mints.unshift(SOL_MINT);
@@ -268,7 +295,7 @@ function atomicAmount(value) {
 
 function transferDetails(parsed) {
   return {
-    native: (parsed?.nativeTransfers || []).map((transfer) => ({ from: transfer.fromUserAccount ?? null, to: transfer.toUserAccount ?? null, atomicAmount: atomicAmount(transfer.amount ?? transfer.lamports ?? transfer.rawAmount) })),
+    native: (parsed?.nativeTransfers || []).map((transfer) => ({ from: transfer.fromUserAccount ?? null, to: transfer.toUserAccount ?? null, atomicAmount: atomicAmount(transfer.amount ?? transfer.lamports ?? transfer.rawAmount), decimals: 9 })),
     tokens: (parsed?.tokenTransfers || []).map((transfer) => {
       const raw = transfer.rawTokenAmount ?? transfer.tokenAmount ?? transfer.amount;
       const decimals = transfer.decimals ?? raw?.decimals;
@@ -284,6 +311,10 @@ export function mapV3Event(event) {
 }
 
 export async function loadV3Events(env, config, address, limit, cursor) {
+  const key = `${V3_WALLET_EVENTS_KEY_PREFIX}${address}:${limit}:${cursor || 'initial'}`;
+  const cached = await cachedValue(env, key, (value) => Array.isArray(value?.events) && Number.isFinite(Date.parse(value.asOf)));
+  if (cached) return { events: cached.events, nextCursor: cached.nextCursor ?? null };
+  if (cacheOnly(config)) { const cause = new Error('Seeded wallet activity is unavailable.'); cause.code = 'WALLET_LOOKUP_UNAVAILABLE'; throw cause; }
   const apiKey = config.heliusApiKey || env.HELIUS_API_KEY;
   if (!apiKey) { const cause = new Error('Helius is not configured.'); cause.code = 'WALLET_LOOKUP_UNAVAILABLE'; throw cause; }
   const page = await parsedEvents(address, apiKey, limit, cursor);

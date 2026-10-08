@@ -11,7 +11,7 @@ function usableCandles(history) {
   return history && typeof history === 'object' && Number.isFinite(Date.parse(history.fetchedAt)) && Array.isArray(history.candles);
 }
 
-export async function candlesForAsset(kv, mint, apiKey, timeframe = '1H', endTimestamp = null) {
+export async function candlesForAsset(kv, mint, apiKey, timeframe = '1H', endTimestamp = null, providerMode = 'live') {
   const plan = candlePlan(timeframe);
   if (!plan) throw new Error('Unsupported candle timeframe.');
   const endKey = endTimestamp === null ? 'latest' : String(endTimestamp);
@@ -20,6 +20,7 @@ export async function candlesForAsset(kv, mint, apiKey, timeframe = '1H', endTim
   const cachedUsable = usableCandles(cached) || (cached?.unavailable === true && Number.isFinite(Date.parse(cached.fetchedAt)));
   const age = cachedUsable ? Date.now() - Date.parse(cached.fetchedAt) : Infinity;
   if (age >= 0 && age <= FRESH_AFTER_MS) return { candles: cached.unavailable ? null : cached.candles, timeframe: plan.timeframe, state: cached.unavailable ? 'unavailable' : 'fresh', fetchedAt: cached.fetchedAt, source: 'birdeye' };
+  if (providerMode === 'cache-only') return { candles: null, timeframe: plan.timeframe, state: 'unavailable', fetchedAt: null, source: 'birdeye' };
   try {
     const result = await fetchCandles(mint, apiKey, plan.timeframe, endTimestamp === null ? Date.now() : endTimestamp * 1000);
     if (!result) {
@@ -37,10 +38,10 @@ export async function candlesForAsset(kv, mint, apiKey, timeframe = '1H', endTim
   }
 }
 
-export async function historyForAsset(kv, mint, apiKey, range = '7d') {
+export async function historyForAsset(kv, mint, apiKey, range = '7d', providerMode = 'live') {
   const plan = legacyHistoryPlan(range);
   if (!plan) throw new Error('Unsupported price-history range.');
-  const history = await candlesForAsset(kv, mint, apiKey, plan.timeframe);
+  const history = await candlesForAsset(kv, mint, apiKey, plan.timeframe, null, providerMode);
   const cutoff = Date.now() - plan.durationMs;
   return { ...history, points: history.candles?.filter((candle) => Date.parse(candle.timestamp) >= cutoff).map((candle) => ({ date: candle.timestamp, price: candle.closeUsd })) || null };
 }
@@ -99,7 +100,7 @@ export async function route(request, env, config, id, origin) {
     const rawLimit = url.searchParams.get('limit');
     const limit = rawLimit === null ? 15 : Number(rawLimit);
     if (!Number.isInteger(limit) || limit < 10 || limit > 20) return error('INVALID_RECENT_TRANSACTION_LIMIT', 'limit must be an integer from 10 to 20.', 400, id, origin);
-    const sample = await loadHeliusDashboardSample(env, config, new Date(), true);
+    const sample = await loadHeliusDashboardSample(env, config, new Date(), true, config.providerMode === 'cache-only');
     return json({ data: { network: sample.network, transactions: sample.transactions.slice(0, limit) }, meta: { ...v3Meta(meta), recentTransactions: { source: sample.source, freshness: sample.transactionsFreshness ?? sample.freshness, asOf: sample.transactionAsOf ?? sample.asOf, slot: sample.slot, sampled: true, limit }, network: { source: sample.network.source, freshness: { chain: sample.network.chain.state, performance: sample.network.performance.state, fees: sample.network.fees.state }, asOf: sample.network.fetchedAt } } }, 200, id, origin, dashboardHeaders);
   }
   if (url.pathname.startsWith('/v3/assets/mint/')) {
@@ -166,12 +167,12 @@ export async function route(request, env, config, id, origin) {
     if (candleSuffix) {
       const timeframe = url.searchParams.get('timeframe') || '1H';
       if (!candlePlan(timeframe)) return error('INVALID_CANDLE_TIMEFRAME', 'timeframe must be an exact supported Birdeye candle timeframe.', 400, id, origin);
-      const candles = await candlesForAsset(env.SNAPSHOTS, mint, config.birdeyeApiKey, timeframe, endTimestamp);
+      const candles = await candlesForAsset(env.SNAPSHOTS, mint, config.birdeyeApiKey, timeframe, endTimestamp, config.providerMode);
       return json({ data: { mint, timeframe: candles.timeframe, count: CANDLE_PAGE_SIZE, candles: candles.candles }, meta: v3Meta(meta, candles) }, 200, id, origin, candleHeaders);
     }
     const range = url.searchParams.get('range') || '7d';
     if (!legacyHistoryPlan(range)) return error('INVALID_HISTORY_RANGE', 'range must be 1d or 7d.', 400, id, origin);
-    const history = await historyForAsset(env.SNAPSHOTS, mint, config.birdeyeApiKey, range);
+    const history = await historyForAsset(env.SNAPSHOTS, mint, config.birdeyeApiKey, range, config.providerMode);
     const points = mapV3HistoryPoints(history.points);
     if (historySuffix) return json({ data: { mint, range, points }, meta: v3Meta(meta, history) }, 200, id, origin, candleHeaders);
     return json({ data: { ...v3Asset(asset), history: { points, state: state === 'fixture' ? 'fixture' : history.state, fetchedAt: history.fetchedAt } }, meta: v3Meta(meta, history) }, 200, id, origin, candleHeaders);

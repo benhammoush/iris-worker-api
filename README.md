@@ -16,6 +16,12 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the detailed frontend-to-Worker o
 
 Any valid public Solana address can be looked up; Iris never requests wallet signing or private keys.
 
+## Vertical testing
+
+`npm run seed:e2e` writes fresh deterministic records to local Wrangler KV at `.wrangler/e2e`. `npm run e2e:serve` seeds that store and starts the Worker on `127.0.0.1:8787` using the `e2e` environment. That environment sets `PROVIDER_MODE=cache-only`, so it reads seeded KV data and cannot call market or chain providers.
+
+The frontend repository's `npm run test:vertical` uses this command to verify browser-to-Worker journeys. The CI policy pairs matching branch names across the repositories and fails closed if the other repository does not provide that branch. Local E2E data is never written to a remote KV namespace.
+
 ## Deployment
 
 Pushes to `main` deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret; the workflow explicitly reports a skipped deployment when that secret is absent. Set `HELIUS_API_KEY`, `JUPITER_API_KEY`, and `BIRDEYE_API_KEY` as Worker secrets. The deploy job invokes the protected `/internal/refresh` endpoint using the `IRIS_REFRESH_TOKEN` GitHub secret, which must match the Worker `REFRESH_TOKEN` secret.

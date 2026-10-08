@@ -75,11 +75,11 @@ export async function refreshHeliusDashboardSample(env, config, previous = null,
   return sample;
 }
 
-export async function loadHeliusDashboardSample(env, config, now = new Date(), refreshIfStale = false) {
+export async function loadHeliusDashboardSample(env, config, now = new Date(), refreshIfStale = false, cacheOnly = false) {
   const cached = env.SNAPSHOTS?.get ? await env.SNAPSHOTS.get(V3_HELIUS_DASHBOARD_KEY, 'json') : null;
   const age = usableDashboardSample(cached) ? now.getTime() - Date.parse(cached.asOf) : Infinity;
   if (age >= 0 && age <= V3_RECENT_TRANSACTIONS_FRESH_AFTER_MS) return { ...cached, freshness: 'fresh' };
-  if (refreshIfStale) {
+  if (refreshIfStale && !cacheOnly) {
     try {
       pendingDashboardRefresh ||= refreshHeliusDashboardSample(env, config, cached, now).finally(() => { pendingDashboardRefresh = null; });
       return { ...await pendingDashboardRefresh, freshness: 'fresh' };
