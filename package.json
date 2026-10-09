@@ -5,7 +5,7 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --local --env local --port 8787 --persist-to .wrangler/local",
     "dev:e2e": "wrangler dev --local --env e2e --port 8787 --persist-to .wrangler/e2e",
     "seed:e2e": "node scripts/seed-e2e-kv.mjs",
     "e2e:serve": "npm run seed:e2e && npm run dev:e2e",
