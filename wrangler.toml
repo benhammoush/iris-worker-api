@@ -50,8 +50,7 @@ id = "00000000000000000000000000000000"
 name = "iris-api-staging"
 
 [env.staging.vars]
-# Replace with the stable staging frontend origin before enabling deployment.
-CORS_ORIGINS = "http://localhost:3000,http://localhost:5173"
+CORS_ORIGINS = "https://iris-staging-orcin.vercel.app"
 
 [[env.staging.kv_namespaces]]
 binding = "SNAPSHOTS"
