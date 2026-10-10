@@ -1,4 +1,4 @@
-export const API_VERSION = '3.14.3';
+export const API_VERSION = '3.15.0';
 export const CHAIN = 'solana';
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const SNAPSHOT_POINTER_KEY = 'snapshot:current';
@@ -6,6 +6,10 @@ export const SNAPSHOT_KEY_PREFIX = 'snapshot:v2:';
 export const CANDLE_KEY_PREFIX = 'candles:v2:birdeye:';
 export const CANDLE_PAGE_SIZE = 300;
 export const V3_WALLET_KEY_PREFIX = 'wallet:v3:';
+export const V3_ASSET_HOLDERS_KEY_PREFIX = 'asset:v3:holders:';
+export const V3_ASSET_DISTRIBUTION_KEY_PREFIX = 'asset:v3:distribution:';
+export const V3_ASSET_TRANSACTIONS_KEY_PREFIX = 'asset:v3:transactions:';
+export const V3_WALLET_EVENTS_KEY_PREFIX = 'wallet:v3:events:';
 export const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 export const REFRESH_INTERVAL_MINUTES = REFRESH_INTERVAL_MS / 60_000;
 export const SNAPSHOT_FRESH_AFTER_MS = 2 * REFRESH_INTERVAL_MS;

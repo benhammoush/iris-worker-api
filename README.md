@@ -8,17 +8,25 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the detailed frontend-to-Worker o
 
 ## Local development
 
-1. Run `npm install`.
+1. Run `npm ci`.
 2. Copy `.dev.vars.example` to `.dev.vars` and set only local values. Do not commit `.dev.vars`.
-3. Create the KV namespaces and replace the placeholder namespace IDs in `wrangler.toml` before deploying.
+3. Local KV requires no remote namespace. `npm run dev` uses `--local --env local`, port 8787, and isolated `.wrangler/local` persistence.
 4. Set `HELIUS_API_KEY`, `JUPITER_API_KEY`, and `BIRDEYE_API_KEY` for live data and on-demand USD OHLCV candles. Never commit secrets or private wallet information.
 5. Run `npm run dev` or `npm test`.
 
 Any valid public Solana address can be looked up; Iris never requests wallet signing or private keys.
 
+## Vertical testing
+
+`npm run seed:e2e` writes fresh deterministic records to local Wrangler KV at `.wrangler/e2e`. `npm run e2e:serve` seeds that store and starts the Worker on `127.0.0.1:8787` using the `e2e` environment. That environment sets `PROVIDER_MODE=cache-only`, so it reads seeded KV data and cannot call market or chain providers.
+
+The frontend repository's `npm run test:vertical` uses this command to verify browser-to-Worker journeys. Frontend CI pins an explicit compatible Worker SHA. Local E2E data is never written to a remote KV namespace.
+
 ## Deployment
 
-Pushes to `main` deploy to Cloudflare after CI passes when the repository has a `CLOUDFLARE_API_TOKEN` GitHub Actions secret; the workflow explicitly reports a skipped deployment when that secret is absent. Set `HELIUS_API_KEY`, `JUPITER_API_KEY`, and `BIRDEYE_API_KEY` as Worker secrets. The deploy job invokes the protected `/internal/refresh` endpoint using the `IRIS_REFRESH_TOKEN` GitHub secret, which must match the Worker `REFRESH_TOKEN` secret.
+Pushes to `main` deploy dev after existing CI passes. For staging/production, manually run CI from `main`, select the environment and exact merged commit SHA, and approve production through its protected GitHub environment. See the frontend [environment setup runbook](https://github.com/benhammoush/iris-dashboard/blob/main/ENVIRONMENTS.md). The repositories deploy independently; keep API changes backward-compatible and deploy the Worker first when both change.
+
+Dev's existing isolated namespace and assigned frontend origin are configured in local `wrangler.toml`; the dev Worker has not yet been deployed. Before enabling deployment, verify actual Worker bindings, configure remote secrets/API origins, and verify staging/production isolation. Local/E2E placeholders stay local. Configure provider keys and `REFRESH_TOKEN` separately as remote Worker secrets; environment-scoped `IRIS_REFRESH_TOKEN` must match `REFRESH_TOKEN`. Set `DEPLOY_ENABLED=true` only after setup. Dev refresh is explicitly requested with `refresh_dev`; staging/production refresh on release and retain hourly Cron.
 
 ## Market data
 
